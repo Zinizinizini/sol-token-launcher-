@@ -36,7 +36,7 @@ function logStep(msg) {
   logsEl.scrollTop = logsEl.scrollHeight;
 }
 
-// Detect wallets dynamically on click
+// Detect wallets dynamically
 function detectWallet() {
   if (window.solana && window.solana.isPhantom) return { wallet: window.solana, name: 'Phantom' };
   if (window.solflare && window.solflare.isSolflare) return { wallet: window.solflare, name: 'Solflare' };
@@ -61,17 +61,15 @@ connectBtn.onclick = async () => {
 
   try {
     logStep('Connecting wallet...');
-    if (walletName === 'Phantom' || walletName === 'Solflare') {
-      await wallet.connect();
-      publicKey = wallet.publicKey;
-    } else if (walletName === 'Slope') {
-      await wallet.connect();
-      publicKey = wallet.publicKey;
-    }
-
+    await wallet.connect();
+    publicKey = wallet.publicKey;
     logStep(`Connected: ${publicKey.toString()}`);
 
-    const connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'), 'confirmed');
+    // ✅ FIX: Use solanaWeb3.Connection
+    const connection = new solanaWeb3.Connection(
+      solanaWeb3.clusterApiUrl('mainnet-beta'),
+      'confirmed'
+    );
 
     logStep('Fetching SOL balance...');
     const lamports = await connection.getBalance(publicKey);
