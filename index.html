@@ -51,13 +51,22 @@ window.addEventListener('DOMContentLoaded', () => {
       const resp = await window.solana.connect();
       logStep('Connected to wallet: ' + resp.publicKey.toString());
 
-      const connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'), 'confirmed');
+      logStep('Creating Solana connection...');
+      const connection = new solanaWeb3.Connection(
+        solanaWeb3.clusterApiUrl('mainnet-beta'),
+        'confirmed'
+      );
+
       logStep('Fetching SOL balance...');
       const lamports = await connection.getBalance(resp.publicKey);
       logStep('SOL Balance: ' + (lamports / 1e9) + ' SOL');
 
       logStep('Fetching SPL token accounts...');
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(resp.publicKey, { programId: solanaWeb3.TOKEN_PROGRAM_ID });
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        resp.publicKey,
+        { programId: solanaWeb3.TOKEN_PROGRAM_ID }
+      );
+
       if (tokenAccounts.value.length === 0) logStep('No SPL tokens found');
       else {
         tokenAccounts.value.forEach((t,i)=> {
