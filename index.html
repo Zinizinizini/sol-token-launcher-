@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Solana Wallet Viewer</title>
+  <title>Universal Solana Wallet Viewer</title>
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -12,7 +12,7 @@
       padding: 30px;
     }
     #walletApp {
-      max-width: 450px;
+      max-width: 500px;
       width: 100%;
       padding: 25px;
       background: #fff;
@@ -41,6 +41,7 @@
       color: #2c3e50;
       background: #e8f4fd;
       text-align: left;
+      white-space: pre-wrap;
     }
   </style>
 </head>
@@ -55,13 +56,20 @@
 
   <!-- Solana Web3.js -->
   <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
-  <!-- Wallet Adapter (Phantom & WalletConnect support) -->
+
+  <!-- Wallet Adapter -->
   <script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-base@0.9.32/lib/index.iife.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-wallets@0.9.32/lib/index.iife.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-phantom@0.9.10/lib/index.iife.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-solflare@0.9.10/lib/index.iife.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-slope@0.9.10/lib/index.iife.min.js"></script>
 
   <script>
-    const { Connection, clusterApiUrl, PublicKey } = solanaWeb3;
+    const { Connection, clusterApiUrl, PublicKey, TOKEN_PROGRAM_ID } = solanaWeb3;
     const { WalletAdapterNetwork } = walletAdapterBase;
+    const { PhantomWalletAdapter } = walletAdapterPhantom;
+    const { SolflareWalletAdapter } = walletAdapterSolflare;
+    const { SlopeWalletAdapter } = walletAdapterSlope;
 
     const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
 
@@ -71,33 +79,40 @@
 
     let wallet = null;
 
+    // Initialize wallet adapters
+    const wallets = [
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter(),
+      new SlopeWalletAdapter(),
+    ];
+
     document.getElementById('connectWallet').onclick = async () => {
       try {
-        // Use Phantom if installed
-        if (window.solana && window.solana.isPhantom) {
-          wallet = window.solana;
-          await wallet.connect();
-          statusEl.innerText = "Connected: " + wallet.publicKey.toString();
-        } else {
-          alert("Please install a Solana wallet like Phantom.");
+        // Pick the first available wallet
+        wallet = wallets.find(w => w.ready);
+        if (!wallet) {
+          alert("No wallet available! Install Phantom, Solflare, or Slope.");
           return;
         }
 
+        // Connect wallet
+        await wallet.connect();
+        const pubkey = wallet.publicKey;
+        statusEl.innerText = "Connected: " + pubkey.toString();
+
         // Get SOL balance
-        const lamports = await connection.getBalance(wallet.publicKey);
+        const lamports = await connection.getBalance(pubkey);
         balanceEl.innerText = "SOL Balance: " + (lamports / 1e9) + " SOL";
 
         // Get SPL tokens
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, { programId: solanaWeb3.TOKEN_PROGRAM_ID });
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID });
         if (tokenAccounts.value.length === 0) {
           tokensEl.innerText = "Tokens: None";
         } else {
           let tokenList = "";
           tokenAccounts.value.forEach(({ account }) => {
             const info = account.data.parsed.info;
-            const amount = info.tokenAmount.uiAmountString;
-            const symbol = info.mint;
-            tokenList += `${symbol}: ${amount}\n`;
+            tokenList += `${info.mint}: ${info.tokenAmount.uiAmountString}\n`;
           });
           tokensEl.innerText = "Tokens:\n" + tokenList;
         }
