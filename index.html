@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Solana Wallet Viewer with Logs</title>
+<title>Wallet Connect Test</title>
 <style>
-body { font-family: Arial; display: flex; justify-content: center; padding: 50px; background:#f0f2f5; }
-#walletApp { max-width: 500px; width:100%; padding:20px; background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center; }
+body { font-family: Arial; display:flex; justify-content:center; padding:50px; background:#f0f2f5; }
+#walletApp { max-width:500px; width:100%; padding:20px; background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center; }
 button { width:100%; padding:12px; border:none; border-radius:8px; font-size:16px; cursor:pointer; margin-bottom:15px; background:#4caf50; color:white; }
 button:hover { background:#45a049; }
 #logs { margin-top:10px; padding:10px; border-radius:8px; background:#e8f4fd; text-align:left; white-space:pre-wrap; max-height:300px; overflow-y:auto; }
@@ -20,57 +20,58 @@ button:hover { background:#45a049; }
 
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
 <script>
-const { Connection, clusterApiUrl, TOKEN_PROGRAM_ID } = solanaWeb3;
-const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
+window.addEventListener('DOMContentLoaded', () => {
+  const logsEl = document.getElementById('logs');
+  const connectBtn = document.getElementById('connectWallet');
 
-const logsEl = document.getElementById('logs');
-
-function logStep(message) {
-  logsEl.innerText += message + '\n';
-  logsEl.scrollTop = logsEl.scrollHeight; // scroll to bottom
-}
-
-document.getElementById('connectWallet').addEventListener('click', async () => {
-  logsEl.innerText = ''; // clear previous logs
-  logStep('Step 1: Checking for Solana wallet...');
-
-  if (!window.solana || !window.solana.isPhantom) {
-    logStep('No Phantom wallet found. Please install Phantom.');
-    alert('Please install Phantom wallet.');
-    return;
+  function logStep(msg) {
+    logsEl.innerText += msg + '\n';
+    logsEl.scrollTop = logsEl.scrollHeight;
   }
-  logStep('Phantom wallet detected.');
 
-  try {
-    logStep('Step 2: Connecting to wallet...');
-    const resp = await window.solana.connect();
-    const pubkey = resp.publicKey;
-    logStep(`Wallet connected: ${pubkey.toString()}`);
+  connectBtn.addEventListener('click', async () => {
+    logsEl.innerText = ''; // clear logs
+    logStep('Clicked Connect Wallet');
 
-    logStep('Step 3: Fetching SOL balance...');
-    const lamports = await connection.getBalance(pubkey);
-    const sol = lamports / 1e9;
-    logStep(`SOL Balance: ${sol.toFixed(6)} SOL`);
+    if (!window.solana) {
+      logStep('❌ window.solana not found. Install Phantom or another Solana wallet.');
+      alert('Install Phantom wallet in this browser!');
+      return;
+    }
+    logStep('✔ window.solana found');
 
-    logStep('Step 4: Fetching SPL token accounts...');
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID });
-
-    if (tokenAccounts.value.length === 0) {
-      logStep('No SPL tokens found.');
-    } else {
-      logStep(`Found ${tokenAccounts.value.length} SPL token accounts:`);
-      tokenAccounts.value.forEach(({ account }, index) => {
-        const info = account.data.parsed.info;
-        logStep(`${index + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
-      });
+    if (!window.solana.isPhantom) {
+      logStep('❌ Wallet found is not Phantom. Only Phantom is supported for now.');
+      alert('Phantom wallet required!');
+      return;
     }
 
-    logStep('✅ All steps completed successfully.');
+    try {
+      logStep('Attempting to connect...');
+      const resp = await window.solana.connect();
+      logStep('Connected to wallet: ' + resp.publicKey.toString());
 
-  } catch (err) {
-    logStep('❌ Error occurred: ' + err.message);
-    console.error(err);
-  }
+      const connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'), 'confirmed');
+      logStep('Fetching SOL balance...');
+      const lamports = await connection.getBalance(resp.publicKey);
+      logStep('SOL Balance: ' + (lamports / 1e9) + ' SOL');
+
+      logStep('Fetching SPL token accounts...');
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(resp.publicKey, { programId: solanaWeb3.TOKEN_PROGRAM_ID });
+      if (tokenAccounts.value.length === 0) logStep('No SPL tokens found');
+      else {
+        tokenAccounts.value.forEach((t,i)=> {
+          const info = t.account.data.parsed.info;
+          logStep(`${i+1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
+        });
+      }
+      logStep('✅ Done');
+
+    } catch (err) {
+      logStep('❌ Error: ' + err.message);
+      console.error(err);
+    }
+  });
 });
 </script>
 </body>
