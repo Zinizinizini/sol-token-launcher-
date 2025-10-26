@@ -1,0 +1,94 @@
+<div id="bonuscoinMinter" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 400px; padding: 20px; background: #f7f8fa; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin: auto;">
+  <h2 style="text-align: center; color: #2c3e50;">BonusCoin Token Minter</h2>
+  <button id="connectWallet" style="width:100%; padding:10px; border:none; border-radius:10px; background: #4caf50; color:white; font-size:16px; cursor:pointer; margin-bottom:10px;">Connect Wallet</button>
+  
+  <input type="text" id="tokenName" placeholder="Token Name" value="BonusCoin" style="width:100%; padding:8px; border-radius:10px; border:1px solid #ccc; margin-bottom:10px; font-size:14px;">
+  <input type="text" id="tokenSymbol" placeholder="Token Symbol" value="BONUS" style="width:100%; padding:8px; border-radius:10px; border:1px solid #ccc; margin-bottom:10px; font-size:14px;">
+  
+  <textarea id="tokenDescription" placeholder="Description" style="width:100%; padding:8px; border-radius:10px; border:1px solid #ccc; margin-bottom:10px; font-size:14px;">Official BonusCoin token</textarea>
+  
+  <button id="mintButton" style="width:100%; padding:10px; border:none; border-radius:10px; background: #2196f3; color:white; font-size:16px; cursor:pointer;">Mint BonusCoin</button>
+  
+  <div id="status" style="margin-top:10px; padding:8px; background:#e8f4fd; border-radius:10px; color:#2c3e50; min-height:24px;"></div>
+  <div id="mintAddress" style="margin-top:10px; padding:8px; background:#e0ffe0; border-radius:10px; color:#2c3e50; min-height:24px;"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.8/lib/index.iife.min.js"></script>
+
+<script>
+(async () => {
+  const { Connection, clusterApiUrl } = solanaWeb3;
+  const { createMint, getOrCreateAssociatedTokenAccount, mintTo, TOKEN_PROGRAM_ID } = splToken;
+
+  const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
+  let provider = null;
+
+  const statusEl = document.getElementById('status');
+  const mintAddressEl = document.getElementById('mintAddress');
+
+  document.getElementById('connectWallet').onclick = async () => {
+    if (window.solana && window.solana.isPhantom) {
+      try {
+        const resp = await window.solana.connect();
+        provider = window.solana;
+        statusEl.innerText = "Wallet connected: " + resp.publicKey.toString();
+      } catch (err) {
+        statusEl.innerText = "Connection failed: " + err.message;
+      }
+    } else {
+      alert("Install Phantom wallet first!");
+    }
+  };
+
+  document.getElementById('mintButton').onclick = async () => {
+    if (!provider) { alert("Connect wallet first!"); return; }
+
+    const walletPublicKey = provider.publicKey;
+    const signTransaction = provider.signTransaction.bind(provider);
+
+    const name = document.getElementById('tokenName').value;
+    const symbol = document.getElementById('tokenSymbol').value;
+    const decimals = 9;
+    const totalSupply = 1000000000n;
+    const totalUnits = totalSupply * 10n ** BigInt(decimals);
+
+    statusEl.innerText = "Creating mint...";
+    try {
+      const mint = await createMint(
+        connection,
+        { publicKey: walletPublicKey, signTransaction },
+        walletPublicKey,
+        null,
+        decimals,
+        undefined,
+        { commitment: 'confirmed' },
+        TOKEN_PROGRAM_ID
+      );
+
+      const tokenAccount = await getOrCreateAssociatedTokenAccount(
+        connection,
+        { publicKey: walletPublicKey, signTransaction },
+        mint,
+        walletPublicKey
+      );
+
+      statusEl.innerText = `Minting ${totalSupply.toLocaleString()} tokens...`;
+      await mintTo(
+        connection,
+        { publicKey: walletPublicKey, signTransaction },
+        mint,
+        tokenAccount.address,
+        walletPublicKey,
+        totalUnits
+      );
+
+      statusEl.innerText = "BonusCoin minted successfully!";
+      mintAddressEl.innerText = "Mint Address: " + mint.toBase58();
+    } catch (err) {
+      console.error(err);
+      statusEl.innerText = "Error: " + (err.message || err.toString());
+    }
+  };
+})();
+</script>
