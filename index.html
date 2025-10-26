@@ -14,106 +14,101 @@ button:hover { background:#45a049; }
 <body>
 <div id="walletApp">
   <h2>Universal Solana Wallet</h2>
-  <button id="connectWallet">Connect Wallet</button>
-  <button id="disconnectWallet">Disconnect Wallet</button>
+  <div>
+    <button id="connectWallet">Connect Wallet</button>
+    <button id="disconnectWallet">Disconnect Wallet</button>
+  </div>
   <div id="logs">Logs will appear here...</div>
 </div>
 
-<!-- Solana Web3.js -->
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
-<!-- Wallet Adapters -->
-<script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-base@0.9.32/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-wallets@0.9.32/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-phantom@0.9.10/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-solflare@0.9.10/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-slope@0.9.10/lib/index.iife.min.js"></script>
 
 <script>
-window.addEventListener('DOMContentLoaded', async () => {
-  const logsEl = document.getElementById('logs');
-  const connectBtn = document.getElementById('connectWallet');
-  const disconnectBtn = document.getElementById('disconnectWallet');
+const logsEl = document.getElementById('logs');
+const connectBtn = document.getElementById('connectWallet');
+const disconnectBtn = document.getElementById('disconnectWallet');
 
-  let wallet = null;
-  let publicKey = null;
+let walletName = null;
+let publicKey = null;
 
-  function logStep(msg) {
-    logsEl.innerText += msg + '\n';
-    logsEl.scrollTop = logsEl.scrollHeight;
+function logStep(msg) {
+  logsEl.innerText += msg + '\n';
+  logsEl.scrollTop = logsEl.scrollHeight;
+}
+
+// Detect wallets dynamically on click
+function detectWallet() {
+  if (window.solana && window.solana.isPhantom) return { wallet: window.solana, name: 'Phantom' };
+  if (window.solflare && window.solflare.isSolflare) return { wallet: window.solflare, name: 'Solflare' };
+  if (window.Slope) return { wallet: window.Slope, name: 'Slope' };
+  return null;
+}
+
+connectBtn.onclick = async () => {
+  logsEl.innerText = '';
+  logStep('Clicked Connect Wallet');
+
+  const detected = detectWallet();
+  if (!detected) {
+    logStep('❌ No wallet found. Install Phantom, Solflare, or Slope.');
+    alert('No wallet found! Install Phantom, Solflare, or Slope.');
+    return;
   }
 
-  // Initialize wallet adapters
-  const { PhantomWalletAdapter } = walletAdapterPhantom;
-  const { SolflareWalletAdapter } = walletAdapterSolflare;
-  const { SlopeWalletAdapter } = walletAdapterSlope;
+  walletName = detected.name;
+  const wallet = detected.wallet;
+  logStep(`✔ Wallet detected: ${walletName}`);
 
-  const wallets = [
-    new PhantomWalletAdapter(),
-    new SolflareWalletAdapter(),
-    new SlopeWalletAdapter(),
-  ];
-
-  async function connectWallet() {
-    logsEl.innerText = '';
-    logStep('Step 1: Detecting wallets...');
-    wallet = wallets.find(w => w.ready);
-
-    if (!wallet) {
-      logStep('❌ No wallet found. Install Phantom, Solflare, or Slope.');
-      alert('No wallet found! Install Phantom, Solflare, or Slope.');
-      return;
-    }
-    logStep(`✔ Wallet detected: ${wallet.name}`);
-
-    try {
-      logStep('Step 2: Connecting wallet...');
+  try {
+    logStep('Connecting wallet...');
+    if (walletName === 'Phantom' || walletName === 'Solflare') {
       await wallet.connect();
       publicKey = wallet.publicKey;
-      logStep(`Connected: ${publicKey.toString()}`);
-
-      const connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'), 'confirmed');
-
-      logStep('Step 3: Fetching SOL balance...');
-      const lamports = await connection.getBalance(publicKey);
-      logStep(`SOL Balance: ${(lamports / 1e9).toFixed(6)} SOL`);
-
-      logStep('Step 4: Fetching SPL tokens...');
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, { programId: solanaWeb3.TOKEN_PROGRAM_ID });
-      if (tokenAccounts.value.length === 0) logStep('No SPL tokens found');
-      else {
-        tokenAccounts.value.forEach((t,i)=> {
-          const info = t.account.data.parsed.info;
-          logStep(`${i+1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
-        });
-      }
-
-      logStep('✅ Wallet connection complete.');
-
-    } catch (err) {
-      logStep('❌ Error: ' + err.message);
-      console.error(err);
+    } else if (walletName === 'Slope') {
+      await wallet.connect();
+      publicKey = wallet.publicKey;
     }
+
+    logStep(`Connected: ${publicKey.toString()}`);
+
+    const connection = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'), 'confirmed');
+
+    logStep('Fetching SOL balance...');
+    const lamports = await connection.getBalance(publicKey);
+    logStep(`SOL Balance: ${(lamports / 1e9).toFixed(6)} SOL`);
+
+    logStep('Fetching SPL tokens...');
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(publicKey, { programId: solanaWeb3.TOKEN_PROGRAM_ID });
+    if (tokenAccounts.value.length === 0) logStep('No SPL tokens found');
+    else tokenAccounts.value.forEach((t,i)=> {
+      const info = t.account.data.parsed.info;
+      logStep(`${i+1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
+    });
+
+    logStep('✅ Wallet connection complete.');
+
+  } catch(err) {
+    logStep('❌ Error: ' + err.message);
+    console.error(err);
   }
+};
 
-  async function disconnectWallet() {
-    if (!wallet || !wallet.connected) {
-      logStep('❌ No wallet connected to disconnect.');
-      return;
-    }
-    try {
-      await wallet.disconnect();
-      logStep('Wallet disconnected successfully.');
-      wallet = null;
-      publicKey = null;
-    } catch (err) {
-      logStep('❌ Error disconnecting: ' + err.message);
-      console.error(err);
-    }
+disconnectBtn.onclick = async () => {
+  if (!walletName || !publicKey) {
+    logStep('❌ No wallet connected.');
+    return;
   }
-
-  connectBtn.addEventListener('click', connectWallet);
-  disconnectBtn.addEventListener('click', disconnectWallet);
-});
+  try {
+    const wallet = detectWallet().wallet;
+    await wallet.disconnect();
+    logStep(`Wallet ${walletName} disconnected.`);
+    walletName = null;
+    publicKey = null;
+  } catch(err) {
+    logStep('❌ Error disconnecting: ' + err.message);
+    console.error(err);
+  }
+};
 </script>
 </body>
 </html>
