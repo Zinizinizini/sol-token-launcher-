@@ -1,91 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Universal Solana Wallet Connect</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      display: flex;
-      justify-content: center;
-      padding: 50px;
-      background: #f4f7fa;
-    }
-    #walletApp {
-      max-width: 400px;
-      width: 100%;
-      padding: 20px;
-      background: #fff;
-      border-radius: 10px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-      text-align: center;
-    }
-    button {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      margin-bottom: 15px;
-      background: #4caf50;
-      color: white;
-    }
-    button:hover {
-      background: #45a049;
-    }
-    #status {
-      margin-top: 10px;
-      padding: 10px;
-      background: #e8f4fd;
-      border-radius: 8px;
-      min-height: 24px;
-      color: #2c3e50;
-    }
-    #balance {
-      margin-top: 10px;
-      padding: 10px;
-      background: #e0ffe0;
-      border-radius: 8px;
-      min-height: 24px;
-      color: #2c3e50;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Solana Wallet Connect</title>
+<style>
+body { font-family: Arial; display: flex; justify-content: center; padding: 50px; background:#f0f2f5; }
+#walletApp { max-width: 400px; width:100%; padding:20px; background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center; }
+button { width:100%; padding:12px; border:none; border-radius:8px; font-size:16px; cursor:pointer; margin-bottom:15px; background:#4caf50; color:white; }
+button:hover { background:#45a049; }
+#status, #balance { margin-top:10px; padding:10px; border-radius:8px; background:#e8f4fd; min-height:24px; text-align:left; }
+</style>
 </head>
 <body>
-  <div id="walletApp">
-    <h2>Connect Your Solana Wallet</h2>
-    <button id="connectWallet">Connect Wallet</button>
-    <div id="status">Status: Not connected</div>
-    <div id="balance">SOL Balance: N/A</div>
-  </div>
+<div id="walletApp">
+  <h2>Connect Your Wallet2</h2>
+  <button id="connectWallet">Connect Wallet</button>
+  <div id="status">Status: Not connected</div>
+  <div id="balance">SOL Balance: N/A</div>
+</div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
-  <script>
-    const { Connection, clusterApiUrl } = solanaWeb3;
-    const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
+<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
+<script>
+const { Connection, clusterApiUrl } = solanaWeb3;
+const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
 
-    const statusEl = document.getElementById('status');
-    const balanceEl = document.getElementById('balance');
+const statusEl = document.getElementById('status');
+const balanceEl = document.getElementById('balance');
 
-    document.getElementById('connectWallet').onclick = async () => {
-      try {
-        if (!window.solana) {
-          alert("Solana wallet not found. Please install a wallet like Phantom.");
-          return;
-        }
+document.getElementById('connectWallet').addEventListener('click', async () => {
+  try {
+    if (!window.solana || !window.solana.isPhantom) {
+      alert("Please install Phantom wallet in this browser.");
+      return;
+    }
 
-        const resp = await window.solana.connect();
-        const pubkey = resp.publicKey;
-        statusEl.innerText = "Connected: " + pubkey.toString();
+    const resp = await window.solana.connect();
+    const pubkey = resp.publicKey;
+    statusEl.innerText = "Connected: " + pubkey.toString();
 
-        const lamports = await connection.getBalance(pubkey);
-        balanceEl.innerText = "SOL Balance: " + (lamports / 1e9) + " SOL";
-      } catch (err) {
-        console.error(err);
-        statusEl.innerText = "Connection failed: " + err.message;
-      }
-    };
-  </script>
+    const lamports = await connection.getBalance(pubkey);
+    balanceEl.innerText = "SOL Balance: " + (lamports / 1e9) + " SOL";
+  } catch (err) {
+    console.error(err);
+    statusEl.innerText = "Connection failed: " + err.message;
+  }
+});
+</script>
 </body>
 </html>
