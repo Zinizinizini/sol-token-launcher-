@@ -3,25 +3,49 @@
 <head>
   <meta charset="UTF-8">
   <title>BonusCoin Minter</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@solana/wallet-adapter-react-ui@0.19.17/dist/index.css">
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#f0f2f5; display:flex; justify-content:center; padding:30px; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      padding: 30px;
+    }
     #bonuscoinMinter {
-      max-width: 450px; width:100%; padding:20px; background:#ffffff; border-radius:15px;
-      box-shadow:0 8px 25px rgba(0,0,0,0.15);
+      max-width: 450px;
+      width: 100%;
+      padding: 25px;
+      background: #fff;
+      border-radius: 15px;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+      text-align: center;
     }
-    h2 { text-align:center; color:#2c3e50; margin-bottom:20px; }
-    input, textarea { width:100%; padding:10px; margin-bottom:12px; border-radius:10px; border:1px solid #ccc; font-size:14px; box-sizing:border-box; }
+    h2 { color: #2c3e50; margin-bottom: 20px; }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
     button {
-      width:100%; padding:12px; border:none; border-radius:10px; font-size:16px; cursor:pointer; margin-bottom:12px;
-      transition:0.3s;
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: 0.3s;
     }
-    #connectWallet { background:#4caf50; color:#fff; }
-    #connectWallet:hover { background:#45a049; }
-    #mintButton { background:#2196f3; color:#fff; }
-    #mintButton:hover { background:#1976d2; }
-    #status { margin-top:10px; padding:10px; background:#e8f4fd; border-radius:10px; min-height:24px; color:#2c3e50; }
-    #mintAddress { margin-top:10px; padding:10px; background:#e0ffe0; border-radius:10px; min-height:24px; color:#2c3e50; word-break:break-all; }
+    #connectWallet { background: #4caf50; color: #fff; }
+    #connectWallet:hover { background: #45a049; }
+    #mintButton { background: #2196f3; color: #fff; }
+    #mintButton:hover { background: #1976d2; }
+    #status { margin-top: 10px; padding: 10px; background: #e8f4fd; border-radius: 10px; min-height: 24px; color: #2c3e50; }
+    #mintAddress { margin-top: 10px; padding: 10px; background: #e0ffe0; border-radius: 10px; min-height: 24px; color: #2c3e50; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -36,7 +60,7 @@
     <div id="mintAddress"></div>
   </div>
 
-  <!-- Solana Web3.js and SPL Token CDN -->
+  <!-- Solana Web3.js and SPL Token via CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.8/lib/index.iife.min.js"></script>
 
@@ -44,21 +68,19 @@
     window.addEventListener('load', async () => {
       const statusEl = document.getElementById('status');
       const mintAddressEl = document.getElementById('mintAddress');
-      const { Connection, clusterApiUrl } = solanaWeb3;
+      const { Connection, clusterApiUrl, PublicKey, Transaction } = solanaWeb3;
       const { createMint, getOrCreateAssociatedTokenAccount, mintTo, TOKEN_PROGRAM_ID } = splToken;
 
       const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
       let provider = null;
 
-      // Connect any wallet (Phantom, Solflare, etc.)
+      // Connect wallet (Phantom recommended)
       document.getElementById('connectWallet').onclick = async () => {
         try {
           if (window.solana && window.solana.isPhantom) {
             provider = window.solana;
-          } else if (window.solflare && window.solflare.isSolflare) {
-            provider = window.solflare;
           } else {
-            alert("No supported wallet found. Install Phantom, Solflare, or compatible wallet.");
+            alert("Install Phantom wallet for best support!");
             return;
           }
           const resp = await provider.connect();
