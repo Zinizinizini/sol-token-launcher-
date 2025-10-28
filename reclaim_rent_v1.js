@@ -35,16 +35,32 @@
     if (logsEl) logsEl.scrollTop = logsEl.scrollHeight;
   }
 
-  // Detect injected wallets (Phantom/Solflare/Slope)
-  function detectWallet() {
-    if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
-    if (window.solana && window.solana.isPhantom) return window.solana; // fallback
-    if (window.solflare && window.solflare.isSolflare) return window.solflare;
-    if (window.Slope) {
-      try { return new window.Slope(); } catch(e){ /* ignore */ }
-    }
-    return null;
-  }
+// Replace the detectWallet() function inside reclaim_rent_v1.js with this version:
+function detectWallet() {
+  // Prefer whichever wallet has .isConnected === true or a publicKey
+  const providers = [];
+
+  if (window.solana?.isPhantom)
+    providers.push(window.solana);
+
+  if (window.phantom?.solana?.isPhantom)
+    providers.push(window.phantom.solana);
+
+  if (window.solflare?.isSolflare)
+    providers.push(window.solflare);
+
+  if (window.Slope)
+    try { providers.push(new window.Slope()); } catch {}
+
+  // pick the one actually connected
+  const active = providers.find(p =>
+    p?.isConnected ||
+    (p?.publicKey && typeof p.publicKey?.toBase58 === 'function')
+  );
+
+  // fallback: first provider available
+  return active || providers[0] || null;
+}
 
   // Build connection (Helius)
   let connection;
