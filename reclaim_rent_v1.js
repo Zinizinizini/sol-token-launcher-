@@ -34,17 +34,22 @@
   // SESSION MANAGER
   const session = new WalletSessionManager();
 
-  // Detect active wallet from dropdown
-  function getSelectedWallet() {
-    const sel = document.getElementById('walletSelect');
-    if(!sel) return null;
-    const name = sel.value;
+  // Detect available wallets
+  function detectWallets() {
     const providers = [];
     if(window.solana?.isPhantom) providers.push({wallet: window.solana, name:'Phantom'});
     if(window.phantom?.solana?.isPhantom) providers.push({wallet: window.phantom.solana, name:'Phantom'});
     if(window.solflare?.isSolflare) providers.push({wallet: window.solflare, name:'Solflare'});
     if(window.Slope) try{ providers.push({wallet: new window.Slope(), name:'Slope'}); } catch{}
-    return providers.find(p=>p.name===name)?.wallet || providers[0]?.wallet || null;
+    return providers;
+  }
+
+  // Get selected wallet from dropdown
+  function getSelectedWallet() {
+    const sel = document.getElementById('walletSelect');
+    if(!sel) return detectWallets()[0]?.wallet || null;
+    const name = sel.value;
+    return detectWallets().find(p=>p.name===name)?.wallet || detectWallets()[0]?.wallet || null;
   }
 
   // Helius connection
@@ -62,10 +67,8 @@
     clearLogs();
     log('🧹 Reclaim Rent started...');
 
-    // Force disconnect stale wallets
     await session.disconnectAll();
 
-    // Connect selected wallet via session manager
     const walletObj = getSelectedWallet();
     if(!walletObj){ log('❌ No wallet selected.'); return; }
 
@@ -100,11 +103,7 @@
     for(const entry of empty){
       const tokenAcctPubkey = entry.pubkey;
       try{
-        const keys=[
-          {pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},
-          {pubkey:new web3.PublicKey(pubkey),isSigner:false,isWritable:true},
-          {pubkey:new web3.PublicKey(pubkey),isSigner:true,isWritable:false}
-        ];
+        const keys=[{pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},{pubkey:new web3.PublicKey(pubkey),isSigner:false,isWritable:true},{pubkey:new web3.PublicKey(pubkey),isSigner:true,isWritable:false}];
         const ix = new web3.TransactionInstruction({keys,programId:new web3.PublicKey(TOKEN_PROGRAM),data:Buffer.from([9])});
         const tx = new web3.Transaction().add(ix);
         tx.feePayer = new web3.PublicKey(pubkey);
@@ -135,18 +134,47 @@
     log('🎉 Reclaim run complete.');
   }
 
-  // Add UI button
+  // Add UI elements
+  const walletApp=document.getElementById('walletApp')||document.body;
+
+  // Wallet dropdown
+  if(!document.getElementById('walletSelect')){
+    const sel=document.createElement('select');
+    sel.id='walletSelect';
+    sel.style.marginRight='10px';
+    detectWallets().forEach(p=>{
+      const opt=document.createElement('option');
+      opt.value=p.name;
+      opt.textContent=p.name;
+      sel.appendChild(opt);
+    });
+    walletApp.appendChild(sel);
+  }
+
+  // Reclaim button
   if(!document.getElementById('reclaimRentBtn')){
     const btn=document.createElement('button');
     btn.id='reclaimRentBtn';
     btn.textContent='🧹 Reclaim Rent';
     btn.style.background='#007bff';
     btn.style.color='#fff';
-    btn.style.marginTop='10px';
+    btn.style.marginRight='10px';
     btn.onclick=reclaimRent;
-    const walletApp=document.getElementById('walletApp');
-    if(walletApp) walletApp.appendChild(btn);
-    else document.body.appendChild(btn);
+    walletApp.appendChild(btn);
+  }
+
+  // Switch Wallet button
+  if(!document.getElementById('switchWalletBtn')){
+    const swBtn=document.createElement('button');
+    swBtn.id='switchWalletBtn';
+    swBtn.textContent='🔄 Switch Wallet';
+    swBtn.style.background='#28a745';
+    swBtn.style.color='#fff';
+    swBtn.onclick=async ()=>{
+      await session.disconnectAll();
+      log('🔄 Wallet disconnected. Select a wallet and click Reclaim Rent to reconnect.');
+    };
+    walletApp.appendChild(swBtn);
   }
 
 })();
