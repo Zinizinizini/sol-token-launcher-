@@ -62,21 +62,11 @@ button:hover {
   <div id="logs">Logs will appear here...</div>
 </div>
 
-<!-- ✅ Reliable Solana Web3.js CDN -->
-<script src="https://unpkg.com/@solana/web3.js@1.91.0/dist/web3.min.js"></script>
+<!-- ✅ Correct CDN for Solana Web3.js -->
+<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
 <script>
-(async () => {
-  // 🕐 Wait until web3.js is fully loaded
-  while (!(window.solanaWeb3 || window.web3 || window.web3js)) {
-    console.log('Waiting for Solana Web3.js to load...');
-    await new Promise(r => setTimeout(r, 200));
-  }
-
-  // Use whichever global name the library exposes
-  const web3 = window.solanaWeb3 || window.web3 || window.web3js;
-  console.log('✅ Solana Web3.js loaded:', web3);
-
+window.addEventListener('DOMContentLoaded', async () => {
   const logsEl = document.getElementById('logs');
   const walletSelect = document.getElementById('walletSelect');
   const connectBtn = document.getElementById('connectWallet');
@@ -86,11 +76,21 @@ button:hover {
   let publicKey = null;
 
   function logStep(msg) {
+    console.log(msg);
     logsEl.innerText += msg + '\n';
     logsEl.scrollTop = logsEl.scrollHeight;
   }
 
-  // 🔍 Detect available wallets
+  // ✅ Check that web3.js loaded
+  if (!window.solanaWeb3) {
+    logStep('❌ Solana Web3.js failed to load. Check the script tag or your internet connection.');
+    return;
+  }
+
+  const web3 = window.solanaWeb3;
+  logStep('✅ Solana Web3.js loaded successfully.');
+
+  // 🔍 Detect wallets
   function detectWallets() {
     const detected = [];
     if (window.solana?.isPhantom)
@@ -102,16 +102,15 @@ button:hover {
     return detected;
   }
 
-  // 🧩 Populate wallet dropdown
   function populateWalletDropdown() {
     const detectedWallets = detectWallets();
+    walletSelect.innerHTML = '<option value="">Select Wallet</option>';
     detectedWallets.forEach(w => {
       const opt = document.createElement('option');
       opt.value = w.name;
       opt.textContent = w.name;
       walletSelect.appendChild(opt);
     });
-
     if (detectedWallets.length === 0) {
       logStep('❌ No wallets detected. Please install Phantom, Solflare, or Slope.');
     } else {
@@ -119,20 +118,18 @@ button:hover {
     }
   }
 
-  window.addEventListener('load', populateWalletDropdown);
+  populateWalletDropdown();
 
   function getSelectedWallet() {
     const selected = walletSelect.value;
     return detectWallets().find(w => w.name === selected);
   }
 
-  // 🪙 Connect wallet
   async function connectWalletFunc() {
     logsEl.innerText = '';
     wallet = getSelectedWallet();
     if (!wallet) {
       logStep('❌ Please select a wallet first.');
-      alert('Select a wallet from the dropdown!');
       return;
     }
 
@@ -174,7 +171,6 @@ button:hover {
     }
   }
 
-  // 🔌 Disconnect wallet
   async function disconnectWalletFunc() {
     if (!wallet) {
       logStep('❌ No wallet connected.');
@@ -193,7 +189,7 @@ button:hover {
 
   connectBtn.addEventListener('click', connectWalletFunc);
   disconnectBtn.addEventListener('click', disconnectWalletFunc);
-})();
+});
 </script>
 
 </body>
