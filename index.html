@@ -65,13 +65,14 @@ button:hover {
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
 <script>
 (async () => {
-  // 🕐 Wait for solanaWeb3 to load fully
-  while (!window.solanaWeb3) {
+  // 🕐 Wait for Solana Web3.js to load (regardless of global name)
+  while (!(window.solanaWeb3 || window.web3js || window.solanaWeb3js)) {
     console.log('Waiting for Solana Web3.js to load...');
     await new Promise(r => setTimeout(r, 200));
   }
 
-  const web3 = window.solanaWeb3;
+  // Pick whichever exists
+  const web3 = window.solanaWeb3 || window.web3js || window.solanaWeb3js;
   console.log('✅ Solana Web3.js loaded:', web3);
 
   const logsEl = document.getElementById('logs');
@@ -83,18 +84,15 @@ button:hover {
   let publicKey = null;
 
   function logStep(msg) {
-    logsEl.innerText += msg + '\\n';
+    logsEl.innerText += msg + '\n';
     logsEl.scrollTop = logsEl.scrollHeight;
   }
 
   function detectWallets() {
     const detected = [];
-    if (window.phantom?.solana?.isPhantom)
-      detected.push({ wallet: window.phantom.solana, name: 'Phantom' });
-    if (window.solflare?.isSolflare)
-      detected.push({ wallet: window.solflare, name: 'Solflare' });
-    if (window.Slope)
-      detected.push({ wallet: new window.Slope(), name: 'Slope' });
+    if (window.solana?.isPhantom) detected.push({ wallet: window.solana, name: 'Phantom' });
+    if (window.solflare?.isSolflare) detected.push({ wallet: window.solflare, name: 'Solflare' });
+    if (window.Slope) detected.push({ wallet: new window.Slope(), name: 'Slope' });
     return detected;
   }
 
@@ -157,7 +155,7 @@ button:hover {
       } else {
         tokenAccounts.value.forEach((t, i) => {
           const info = t.account.data.parsed.info;
-          logStep((i + 1) + '. Mint: ' + info.mint + ', Amount: ' + info.tokenAmount.uiAmountString);
+          logStep(`${i + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
         });
       }
 
@@ -188,7 +186,7 @@ button:hover {
   disconnectBtn.addEventListener('click', disconnectWalletFunc);
 })();
 </script>
-
 </body>
 </html>
+
 
