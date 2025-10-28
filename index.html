@@ -5,14 +5,14 @@
 <title>Universal Solana Wallet DApp (Helius)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:40px;background:#f0f2f5}
-  #walletApp{max-width:700px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
-  select, button{width:48%;padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5px}
-  button{background:#4caf50;color:#fff}
-  button:hover{background:#45a049}
-  #logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
-  h2{margin:0 0 12px 0}
-  .note{font-size:13px;color:#666;margin-top:8px}
+body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:40px;background:#f0f2f5}
+#walletApp{max-width:700px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
+select,button{width:48%;padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5px}
+button{background:#4caf50;color:#fff}
+button:hover{background:#45a049}
+#logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
+h2{margin:0 0 12px 0}
+.note{font-size:13px;color:#666;margin-top:8px}
 </style>
 </head>
 <body>
@@ -36,8 +36,8 @@
 <!-- Solana Web3 -->
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
-<!-- Wallet Session Manager -->
 <script>
+// ---------- WALLET SESSION MANAGER ----------
 class WalletSessionManager {
   constructor() {
     this.activeWallet = null;
@@ -61,7 +61,7 @@ class WalletSessionManager {
     if (!pubkey) throw new Error('Unable to get public key from wallet');
     this.activeWallet = walletObj;
     this.publicKey = pubkey;
-    console.log('🟢 WalletSessionManager: Connected wallet', pubkey);
+    log('🟢 Connected wallet: ' + pubkey);
     return { wallet: walletObj, publicKey: pubkey };
   }
 
@@ -70,9 +70,9 @@ class WalletSessionManager {
     try {
       if (this.activeWallet.disconnect) await this.activeWallet.disconnect();
       else if (this.activeWallet.signOut) await this.activeWallet.signOut();
-      console.log('⚪ WalletSessionManager: Disconnected wallet', this.publicKey);
+      log('⚪ Wallet disconnected: ' + this.publicKey);
     } catch (err) {
-      console.warn('⚠️ WalletSessionManager: Error during disconnect:', err.message);
+      log('⚠️ Disconnect error: ' + err.message);
     } finally {
       this.activeWallet = null;
       this.publicKey = null;
@@ -91,127 +91,128 @@ class WalletSessionManager {
 }
 
 window.walletSessionManager = new WalletSessionManager();
-</script>
 
-<!-- Reclaim Rent v2 -->
-<script>
-(async function(){
-  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
-  const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  const logsEl = document.getElementById('logs');
-  const session = window.walletSessionManager;
+// ---------- UTILS ----------
+const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
+const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const logsEl = document.getElementById('logs');
+const session = window.walletSessionManager;
 
-  function log(msg){ console.log(msg); logsEl.innerText += msg + '\n'; logsEl.scrollTop = logsEl.scrollHeight; }
-  function clearLogs(){ logsEl.innerText = ''; }
+function log(msg){ console.log(msg); logsEl.innerText += msg + '\n'; logsEl.scrollTop = logsEl.scrollHeight; }
+function clearLogs(){ logsEl.innerText = ''; }
 
-  function detectWallets() {
-    const providers = [];
-    if(window.solana?.isPhantom) providers.push({wallet: window.solana, name:'Phantom'});
-    if(window.phantom?.solana?.isPhantom) providers.push({wallet: window.phantom.solana, name:'Phantom'});
-    if(window.solflare?.isSolflare) providers.push({wallet: window.solflare, name:'Solflare'});
-    if(window.Slope) try{ providers.push({wallet: new window.Slope(), name:'Slope'}); } catch{}
-    log('Detected wallets: ' + providers.map(p=>p.name).join(', '));
-    return providers;
-  }
+function detectWallets() {
+  const providers = [];
+  if(window.solana?.isPhantom) providers.push({wallet: window.solana, name:'Phantom'});
+  if(window.phantom?.solana?.isPhantom) providers.push({wallet: window.phantom.solana, name:'Phantom'});
+  if(window.solflare?.isSolflare) providers.push({wallet: window.solflare, name:'Solflare'});
+  if(window.Slope) try{ providers.push({wallet: new window.Slope(), name:'Slope'}); } catch{}
+  log('Detected wallets: ' + providers.map(p=>p.name).join(', '));
+  return providers;
+}
 
-  function getSelectedWallet() {
-    const sel = document.getElementById('walletSelect');
-    const name = sel.value;
-    return detectWallets().find(p=>p.name===name)?.wallet || detectWallets()[0]?.wallet || null;
-  }
-
-  let connection;
-  try { connection = new solanaWeb3.Connection(HELIUS_RPC, 'confirmed'); log('✅ Connected to Helius RPC'); } 
-  catch(e){ log('⚠️ Helius connection failed: ' + e.message); return; }
-
-  async function reclaimRent() {
-    clearLogs();
-    log('🧹 Reclaim Rent started...');
-    await session.disconnectAll();
-
-    const walletObj = getSelectedWallet();
-    if(!walletObj){ log('❌ No wallet selected.'); return; }
-
-    let wallet, pubkey;
-    try{
-      const result = await session.connect(walletObj);
-      wallet = result.wallet;
-      pubkey = result.publicKey;
-      log('Connected wallet: ' + pubkey);
-    } catch(err){ log('❌ Wallet connect failed: ' + err.message); return; }
-
-    log('Step: Fetching SPL token accounts...');
-    let tokenAccounts;
-    try {
-      tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        new solanaWeb3.PublicKey(pubkey),
-        { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
-      );
-    } catch(e){ log('❌ Failed to fetch token accounts: '+e.message); return; }
-
-    const empty = tokenAccounts.value.filter(t=>Number(t.account.data.parsed.info.tokenAmount.uiAmount)===0);
-    if(empty.length===0){ log('✅ No empty token accounts found.'); return; }
-
-    log(`🪣 Found ${empty.length} empty token account(s). Closing...`);
-
-    for(const entry of empty){
-      const tokenAcctPubkey = entry.pubkey;
-      try{
-        const keys=[
-          {pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},
-          {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:false,isWritable:true},
-          {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:true,isWritable:false}
-        ];
-        const ix = new solanaWeb3.TransactionInstruction({keys,programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),data:Buffer.from([9])});
-        const tx = new solanaWeb3.Transaction().add(ix);
-        tx.feePayer = new solanaWeb3.PublicKey(pubkey);
-        const { blockhash } = await connection.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
-
-        if(wallet.signTransaction){
-          const signedTx = await wallet.signTransaction(tx);
-          const raw = signedTx.serialize();
-          const sig = await connection.sendRawTransaction(raw);
-          await connection.confirmTransaction(sig,'confirmed');
-          log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
-        } else if(wallet.signAndSendTransaction){
-          const res = await wallet.signAndSendTransaction(tx);
-          const sig = res?.signature||res;
-          await connection.confirmTransaction(sig,'confirmed');
-          log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
-        } else{ throw new Error('Wallet cannot sign transaction'); }
-      } catch(err){ log(`❌ Failed to close ${tokenAcctPubkey.toString()}: ${err?.message||String(err)}`); }
-    }
-    log('🎉 Reclaim run complete.');
-  }
-
-  document.getElementById('reclaimRentBtn').onclick = reclaimRent;
-
-  // Populate wallet dropdown
+function populateDropdown() {
   const sel = document.getElementById('walletSelect');
-  detectWallets().forEach(w=>{ 
-    const opt = document.createElement('option'); 
-    opt.value=w.name; 
-    opt.textContent=w.name; 
-    sel.appendChild(opt); 
+  sel.innerHTML = '<option value="">Select Wallet</option>';
+  detectWallets().forEach(w=> {
+    const opt = document.createElement('option');
+    opt.value = w.name;
+    opt.textContent = w.name;
+    sel.appendChild(opt);
   });
+}
 
-  document.getElementById('connectWallet').onclick = async ()=>{
-    clearLogs();
-    const walletObj = getSelectedWallet();
-    if(!walletObj){ log('❌ No wallet selected.'); return; }
-    try { 
-      const result = await session.connect(walletObj);
-      log('✅ Connected wallet: '+result.publicKey);
-    } catch(err){ log('❌ Connect failed: '+err.message); }
-  };
+function getSelectedWallet() {
+  const sel = document.getElementById('walletSelect');
+  const name = sel.value;
+  return detectWallets().find(p=>p.name===name)?.wallet || detectWallets()[0]?.wallet || null;
+}
 
-  document.getElementById('disconnectWallet').onclick = async ()=>{
-    await session.disconnectAll();
-    log('🔄 Wallet disconnected.');
-  };
+// ---------- RPC CONNECTION ----------
+let connection;
+try { connection = new solanaWeb3.Connection(HELIUS_RPC, 'confirmed'); log('✅ Connected to Helius RPC'); } 
+catch(e){ log('⚠️ Helius RPC connection failed: ' + e.message); }
 
-})();
+// ---------- RECLAIM FUNCTION ----------
+async function reclaimRent() {
+  clearLogs();
+  log('🧹 Reclaim Rent started...');
+  await session.disconnectAll();
+
+  const walletObj = getSelectedWallet();
+  if(!walletObj){ log('❌ No wallet selected.'); return; }
+
+  let wallet, pubkey;
+  try{
+    const result = await session.connect(walletObj);
+    wallet = result.wallet;
+    pubkey = result.publicKey;
+  } catch(err){ log('❌ Wallet connect failed: '+err.message); return; }
+
+  let tokenAccounts;
+  try {
+    tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+      new solanaWeb3.PublicKey(pubkey),
+      { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
+    );
+  } catch(e){ log('❌ Fetch token accounts failed: '+e.message); return; }
+
+  const empty = tokenAccounts.value.filter(t=>Number(t.account.data.parsed.info.tokenAmount.uiAmount)===0);
+  if(empty.length===0){ log('✅ No empty token accounts found.'); return; }
+
+  log(`🪣 Found ${empty.length} empty token account(s). Closing...`);
+
+  for(const entry of empty){
+    const tokenAcctPubkey = entry.pubkey;
+    try{
+      const keys=[
+        {pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},
+        {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:false,isWritable:true},
+        {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:true,isWritable:false}
+      ];
+      const ix = new solanaWeb3.TransactionInstruction({keys,programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),data:Buffer.from([9])});
+      const tx = new solanaWeb3.Transaction().add(ix);
+      tx.feePayer = new solanaWeb3.PublicKey(pubkey);
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+
+      if(wallet.signTransaction){
+        const signedTx = await wallet.signTransaction(tx);
+        const raw = signedTx.serialize();
+        const sig = await connection.sendRawTransaction(raw);
+        await connection.confirmTransaction(sig,'confirmed');
+        log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
+      } else if(wallet.signAndSendTransaction){
+        const res = await wallet.signAndSendTransaction(tx);
+        const sig = res?.signature||res;
+        await connection.confirmTransaction(sig,'confirmed');
+        log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
+      } else{ throw new Error('Wallet cannot sign transaction'); }
+    } catch(err){ log(`❌ Failed to close ${tokenAcctPubkey.toString()}: ${err?.message||String(err)}`); }
+  }
+
+  log('🎉 Reclaim run complete.');
+}
+
+// ---------- BUTTONS ----------
+document.getElementById('reclaimRentBtn').onclick = reclaimRent;
+
+document.getElementById('connectWallet').onclick = async ()=>{
+  clearLogs();
+  const walletObj = getSelectedWallet();
+  if(!walletObj){ log('❌ No wallet selected.'); return; }
+  try { await session.connect(walletObj); } 
+  catch(err){ log('❌ Connect failed: '+err.message); }
+};
+
+document.getElementById('disconnectWallet').onclick = async ()=>{
+  await session.disconnectAll();
+  log('🔄 Wallet disconnected.');
+};
+
+// ---------- INITIALIZE ----------
+populateDropdown();
+setInterval(populateDropdown, 3000); // re-detect wallets periodically
 </script>
 </body>
 </html>
