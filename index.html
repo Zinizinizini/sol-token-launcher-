@@ -151,45 +151,117 @@ h2{margin:0 0 12px 0}
     catch(err){ logStep('❌ Disconnect error: '+err.message); console.error(err); }
   }
 
-  // ---------- Reclaim Rent ----------
-  async function reclaimRentFunc() {
-    logsEl.innerText = '';
-    if (!wallet) await connectWalletFunc();
-    if (!wallet) return;
-
+    // ---------- Reclaim Rent ----------
+    const DUST_THRESHOLD_USD = 0.01; // treat accounts < 1 cent as empty
+  
+  async function getTokenPrices(mints) {
+    // Helius API: fetch multiple token prices at once
+    const res = await fetch('https://api.helius.xyz/v0/token-prices?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mints })
+    });
+    const data = await res.json();
+    const priceMap = {};
+    data.forEach(p => {
+      priceMap[p.mint] = p.price || 0;
+    });
+    return priceMap;
+  }
+  
+  async function reclaimRent() {
+    clearLogs();
+    log('🧹 Reclaim Rent started...');
+    await session.disconnectAll();
+  
+    const walletObj = getSelectedWallet();
+    if(!walletObj){ log('❌ No wallet selected.'); return; }
+  
+    let wallet, pubkey;
     try {
-      logStep('🧹 Reclaim Rent started...');
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey),
-        { programId: new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(TOKEN_PROGRAM) }
+      const result = await session.connect(walletObj);
+      wallet = result.wallet;
+      pubkey = result.publicKey;
+      log('Connected wallet: ' + pubkey);
+    } catch(err) {
+      log('❌ Wallet connect failed: ' + err.message);
+      return;
+    }
+  
+    // Fetch token accounts
+    let tokenAccounts;
+    try {
+      tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        new solanaWeb3.PublicKey(pubkey),
+        { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
       );
-      const empty = tokenAccounts.value.filter(t=>Number(t.account.data.parsed.info.tokenAmount.uiAmount)===0);
-      if(empty.length===0){ logStep('✅ No empty token accounts'); return; }
-
-      logStep(`🪣 Found ${empty.length} empty accounts, closing...`);
-      for(const t of empty){
+    } catch(e) {
+      log('❌ Failed to fetch token accounts: ' + e.message);
+      return;
+    }
+  
+    if(!tokenAccounts || tokenAccounts.value.length === 0) {
+      log('✅ No token accounts found.');
+      return;
+    }
+  
+    // Gather mints to query prices
+    const mints = tokenAccounts.value.map(t => t.account.data.parsed.info.mint);
+    const priceMap = await getTokenPrices(mints);
+  
+    // Filter "empty" accounts by USD value
+    const empty = tokenAccounts.value.filter(t => {
+      const amount = Number(t.account.data.parsed.info.tokenAmount.uiAmount);
+      const mint = t.account.data.parsed.info.mint;
+      const price = priceMap[mint] || 0;
+      const valueUSD = amount * price;
+      return valueUSD < DUST_THRESHOLD_USD;
+    });
+  
+    if(empty.length === 0){
+      log('✅ No empty (dust) token accounts found — nothing to reclaim.');
+      return;
+    }
+  
+    log(`🪣 Found ${empty.length} empty/dust token account(s). Closing...`);
+  
+    for(const entry of empty){
+      const tokenAcctPubkey = entry.pubkey;
+      try{
         const keys=[
-          {pubkey:t.pubkey,isSigner:false,isWritable:true},
-          {pubkey:new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey),isSigner:false,isWritable:true},
-          {pubkey:new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey),isSigner:true,isWritable:false}
+          {pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},
+          {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:false,isWritable:true},
+          {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:true,isWritable:false}
         ];
-        const ix = new (window.solanaWeb3 || window.web3 || window.web3js).TransactionInstruction({keys,programId:new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(TOKEN_PROGRAM),data:Buffer.from([9])});
-        const tx = new (window.solanaWeb3 || window.web3 || window.web3js).Transaction().add(ix);
-        tx.feePayer = new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey);
+        const ix = new solanaWeb3.TransactionInstruction({
+          keys,
+          programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
+          data: Buffer.from([9])
+        });
+        const tx = new solanaWeb3.Transaction().add(ix);
+        tx.feePayer = new solanaWeb3.PublicKey(pubkey);
         const { blockhash } = await connection.getLatestBlockhash();
         tx.recentBlockhash = blockhash;
-
+  
         let sig;
-        if(wallet.signTransaction){ const s=await wallet.signTransaction(tx); sig=await connection.sendRawTransaction(s.serialize()); }
-        else if(wallet.signAndSendTransaction){ const s=await wallet.signAndSendTransaction(tx); sig=s?.signature||s; }
+        if(wallet.signTransaction){
+          const signedTx = await wallet.signTransaction(tx);
+          sig = await connection.sendRawTransaction(signedTx.serialize());
+        } else if(wallet.signAndSendTransaction){
+          const res = await wallet.signAndSendTransaction(tx);
+          sig = res?.signature || res;
+        } else{
+          throw new Error('Wallet cannot sign transaction');
+        }
         await connection.confirmTransaction(sig,'confirmed');
-        logStep(`✅ Closed ${t.pubkey.toString()} — tx ${sig}`);
+        log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
+      } catch(err){
+        log(`❌ Failed to close ${tokenAcctPubkey.toString()}: ${err?.message||String(err)}`);
       }
-      logStep('🎉 Reclaim run complete.');
-    } catch(err){
-      logStep('❌ Reclaim error: ' + (err?.message||String(err)));
-      console.error(err);
     }
+  
+    log('🎉 Reclaim run complete.');
+  }
   }
 
   // Wire buttons
@@ -211,3 +283,4 @@ h2{margin:0 0 12px 0}
 </script>
 </body>
 </html>
+
