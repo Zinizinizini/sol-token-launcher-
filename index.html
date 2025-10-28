@@ -1,14 +1,79 @@
-<!-- ✅ Reliable global Solana Web3.js build -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Universal Solana Wallet DApp</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  font-family: Arial, sans-serif;
+  display: flex;
+  justify-content: center;
+  padding: 50px;
+  background: #f0f2f5;
+}
+#walletApp {
+  max-width: 600px;
+  width: 100%;
+  padding: 20px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  text-align: center;
+}
+select, button {
+  width: 48%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  margin: 5px;
+}
+button {
+  background: #4caf50;
+  color: white;
+}
+button:hover {
+  background: #45a049;
+}
+#logs {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #e8f4fd;
+  text-align: left;
+  white-space: pre-wrap;
+  max-height: 400px;
+  overflow-y: auto;
+}
+</style>
+</head>
+<body>
+<div id="walletApp">
+  <h2>Universal Solana Wallet DApp</h2>
+  <select id="walletSelect">
+    <option value="">Select Wallet</option>
+  </select>
+  <div>
+    <button id="connectWallet">Connect Wallet</button>
+    <button id="disconnectWallet">Disconnect Wallet</button>
+  </div>
+  <div id="logs">Logs will appear here...</div>
+</div>
+
+<!-- ✅ Reliable Solana Web3.js CDN -->
 <script src="https://unpkg.com/@solana/web3.js@1.91.0/dist/web3.min.js"></script>
+
 <script>
 (async () => {
-  // Wait for Web3 to load
+  // 🕐 Wait until web3.js is fully loaded
   while (!(window.solanaWeb3 || window.web3 || window.web3js)) {
     console.log('Waiting for Solana Web3.js to load...');
     await new Promise(r => setTimeout(r, 200));
   }
 
-  // Assign global reference safely
+  // Use whichever global name the library exposes
   const web3 = window.solanaWeb3 || window.web3 || window.web3js;
   console.log('✅ Solana Web3.js loaded:', web3);
 
@@ -25,14 +90,19 @@
     logsEl.scrollTop = logsEl.scrollHeight;
   }
 
+  // 🔍 Detect available wallets
   function detectWallets() {
     const detected = [];
-    if (window.solana?.isPhantom) detected.push({ wallet: window.solana, name: 'Phantom' });
-    if (window.solflare?.isSolflare) detected.push({ wallet: window.solflare, name: 'Solflare' });
-    if (window.Slope) detected.push({ wallet: new window.Slope(), name: 'Slope' });
+    if (window.solana?.isPhantom)
+      detected.push({ wallet: window.solana, name: 'Phantom' });
+    if (window.solflare?.isSolflare)
+      detected.push({ wallet: window.solflare, name: 'Solflare' });
+    if (window.Slope)
+      detected.push({ wallet: new window.Slope(), name: 'Slope' });
     return detected;
   }
 
+  // 🧩 Populate wallet dropdown
   function populateWalletDropdown() {
     const detectedWallets = detectWallets();
     detectedWallets.forEach(w => {
@@ -43,7 +113,7 @@
     });
 
     if (detectedWallets.length === 0) {
-      logStep('❌ No wallets detected. Install Phantom, Solflare, or Slope.');
+      logStep('❌ No wallets detected. Please install Phantom, Solflare, or Slope.');
     } else {
       logStep('Detected wallets: ' + detectedWallets.map(w => w.name).join(', '));
     }
@@ -56,6 +126,7 @@
     return detectWallets().find(w => w.name === selected);
   }
 
+  // 🪙 Connect wallet
   async function connectWalletFunc() {
     logsEl.innerText = '';
     wallet = getSelectedWallet();
@@ -79,7 +150,7 @@
 
       logStep('Step 3: Fetching SOL balance...');
       const lamports = await connection.getBalance(publicKey);
-      logStep('SOL Balance: ' + (lamports / 1e9).toFixed(6) + ' SOL');
+      logStep('💰 SOL Balance: ' + (lamports / 1e9).toFixed(6) + ' SOL');
 
       logStep('Step 4: Fetching SPL tokens...');
       const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
@@ -103,6 +174,7 @@
     }
   }
 
+  // 🔌 Disconnect wallet
   async function disconnectWalletFunc() {
     if (!wallet) {
       logStep('❌ No wallet connected.');
@@ -123,3 +195,6 @@
   disconnectBtn.addEventListener('click', disconnectWalletFunc);
 })();
 </script>
+
+</body>
+</html>
