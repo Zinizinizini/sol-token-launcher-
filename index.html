@@ -54,13 +54,12 @@ th,td{border:1px solid #ccc;padding:8px;text-align:center}
 <div id="logs">Logs will appear here...</div>
 </div>
 
-<!-- Web3.js -->
+<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-<!-- SPL Token -->
-<script src="https://unpkg.com/@solana/spl-token@0.3.5/lib/index.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.5/lib/index.iife.min.js"></script>
 
 <script>
-(async function() {
+window.addEventListener('DOMContentLoaded', async () => {
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
 const TOKEN_PROGRAM = window.splToken.TOKEN_PROGRAM_ID;
 const DUST_THRESHOLD_USD = 0.01;
@@ -78,7 +77,7 @@ const destWalletInput = document.getElementById('destWallet');
 
 let wallet = null;
 let publicKey = null;
-let connection = null;
+let connection = new solanaWeb3.Connection(HELIUS_RPC, 'confirmed');
 let selectedWalletObj = null;
 
 const WALLET_ICONS = {
@@ -110,8 +109,6 @@ function populateDropdown(){
 }
 selectedEl.parentElement.onclick=()=>{ optionsEl.style.display = optionsEl.style.display==='flex'?'none':'flex'; }
 
-function buildConnection(){ return new solanaWeb3.Connection(HELIUS_RPC,'confirmed'); }
-
 async function getTokenPrices(mints){
   if(!mints.length) return {};
   try{
@@ -132,17 +129,15 @@ async function connectWalletFunc(){
   try{
     log('Connecting ' + selectedWalletObj.name + '...');
     const resp = await selectedWalletObj.wallet.connect();
-    publicKey = resp?.publicKey || selectedWalletObj.wallet?.publicKey;
-    if(publicKey?.toString) publicKey=publicKey.toString();
+    publicKey = resp?.publicKey?.toString() || selectedWalletObj.wallet?.publicKey?.toString();
     wallet = selectedWalletObj.wallet;
     log('✅ Connected: '+publicKey);
-    if(!connection) connection=buildConnection();
 
-    // SOL
+    // SOL Balance
     const lamports = await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
     log('💰 SOL Balance: ' + (lamports/1e9).toFixed(6) + ' SOL');
 
-    // SPL
+    // SPL Tokens
     const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
       new solanaWeb3.PublicKey(publicKey),
       {programId: TOKEN_PROGRAM}
@@ -150,17 +145,16 @@ async function connectWalletFunc(){
     const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
     const prices = await getTokenPrices(mints);
     tokenTableBody.innerHTML='';
+
     if(!tokenAccounts.value.length) { log('No SPL tokens found.'); tokenTableContainer.style.display='none'; return; }
 
-    tokenAccounts.value.forEach((t,i)=>{
-      const info=t.account.data.parsed.info;
-      const amount=Number(info.tokenAmount.uiAmount);
-      const usd=(amount*(prices[info.mint]||0)).toFixed(6);
+    tokenAccounts.value.forEach(t=>{
+      const info = t.account.data.parsed.info;
+      const amount = Number(info.tokenAmount.uiAmount);
+      const usd = (amount*(prices[info.mint]||0)).toFixed(6);
       const row=document.createElement('tr');
       row.innerHTML=`<td><input type="checkbox" data-pubkey="${t.pubkey.toString()}" data-mint="${info.mint}" data-amount="${amount}"></td>
-                       <td>${info.mint}</td>
-                       <td>${amount}</td>
-                       <td>$${usd}</td>`;
+                       <td>${info.mint}</td><td>${amount}</td><td>$${usd}</td>`;
       tokenTableBody.appendChild(row);
     });
     tokenTableContainer.style.display='block';
@@ -170,8 +164,11 @@ async function connectWalletFunc(){
 
 async function disconnectWalletFunc(){
   if(!wallet){ log('❌ No wallet connected'); return; }
-  try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null; selectedWalletObj=null; tokenTableContainer.style.display='none';}
-  catch(e){ log('❌ Disconnect error: '+e.message);}
+  try{
+    if(wallet.disconnect) await wallet.disconnect();
+    log('Wallet disconnected');
+    wallet=null; publicKey=null; selectedWalletObj=null; tokenTableContainer.style.display='none';
+  } catch(e){ log('❌ Disconnect error: '+e.message);}
 }
 
 async function reclaimRent(){
@@ -186,14 +183,14 @@ async function reclaimRent(){
   if(!checkboxes.length){ log('❌ Select token accounts to reclaim'); return; }
 
   for(const cb of checkboxes){
-    const tokenPub = new solanaWeb3.PublicKey(cb.dataset.pubkey);
     const mint = cb.dataset.mint;
     const amount = Number(cb.dataset.amount);
+    const tokenPub = new solanaWeb3.PublicKey(cb.dataset.pubkey);
 
     try{
       const token = new window.splToken.Token(connection, mint, TOKEN_PROGRAM, wallet);
-      const fromTokenAccount = await token.getOrCreateAssociatedAccountInfo(new solanaWeb3.PublicKey(publicKey));
       const destTokenAccount = await token.getOrCreateAssociatedAccountInfo(new solanaWeb3.PublicKey(destWallet));
+      const fromTokenAccount = await token.getOrCreateAssociatedAccountInfo(tokenPub);
 
       const tx = new solanaWeb3.Transaction();
       tx.add(
@@ -231,7 +228,7 @@ async function reclaimRent(){
       await connection.confirmTransaction(sig,'confirmed');
       log(`✅ Transferred & closed ${tokenPub.toString()} — tx ${sig}`);
 
-    }catch(e){ log(`❌ Transfer/Close failed for ${tokenPub.toString()}: ${e?.message||e}`); }
+    } catch(e){ log(`❌ Transfer/Close failed for ${tokenPub.toString()}: ${e?.message||e}`); }
   }
 
   log('🎉 Reclaim run complete.');
@@ -240,11 +237,9 @@ async function reclaimRent(){
 connectBtn.addEventListener('click', connectWalletFunc);
 disconnectBtn.addEventListener('click', disconnectWalletFunc);
 reclaimBtn.addEventListener('click', reclaimRent);
-
-connection = buildConnection();
 populateDropdown();
 setInterval(()=>{ if(detectWallets().length !== optionsEl.children.length) populateDropdown(); },3000);
-})();
+});
 </script>
 </body>
 </html>
