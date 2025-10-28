@@ -7,12 +7,16 @@
 <style>
 body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:40px;background:#f0f2f5}
 #walletApp{max-width:700px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
-select,button{width:48%;padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5px}
+select,button{width:48%;padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5}
 button{background:#4caf50;color:#fff}
 button:hover{background:#45a049}
+#walletSelect option {padding-left:24px;} /* space for icon */
 #logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
 h2{margin:0 0 12px 0}
 .note{font-size:13px;color:#666;margin-top:8px}
+.wallet-icon {
+  width:16px; height:16px; vertical-align:middle; margin-right:6px;
+}
 </style>
 </head>
 <body>
@@ -39,7 +43,7 @@ h2{margin:0 0 12px 0}
 (async function() {
   const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
   const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-  const DUST_THRESHOLD_USD = 0.01; // treat accounts < $0.01 as empty/dust
+  const DUST_THRESHOLD_USD = 0.01;
 
   const walletSelect = document.getElementById('walletSelect');
   const connectBtn = document.getElementById('connectWallet');
@@ -51,12 +55,13 @@ h2{margin:0 0 12px 0}
   let publicKey = null;
   let connection = null;
 
-  function log(msg){
-    console.log(msg);
-    logsEl.innerText += msg + '\n';
-    logsEl.scrollTop = logsEl.scrollHeight;
-  }
+  const WALLET_ICONS = {
+    Phantom: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/main/packages/wallets/wallet-icons/src/phantom.svg',
+    Solflare: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/main/packages/wallets/wallet-icons/src/solflare.svg',
+    Slope: 'https://raw.githubusercontent.com/solana-labs/wallet-adapter/main/packages/wallets/wallet-icons/src/slope.svg'
+  };
 
+  function log(msg){ logsEl.innerText += msg + '\n'; logsEl.scrollTop = logsEl.scrollHeight; console.log(msg); }
   function clearLogs(){ logsEl.innerText=''; }
 
   function detectWallets() {
@@ -69,70 +74,59 @@ h2{margin:0 0 12px 0}
 
   function populateWalletDropdown() {
     walletSelect.innerHTML = '<option value="">Select Wallet</option>';
-    const detected = detectWallets();
-    detected.forEach(w => {
+    detectWallets().forEach(w => {
       const opt = document.createElement('option');
       opt.value = w.name;
       opt.textContent = w.name;
       walletSelect.appendChild(opt);
     });
-    if(detected.length === 0) log('❌ No wallets detected. Install Phantom, Solflare, or Slope.');
-    else log('Detected wallets: ' + detected.map(d=>d.name).join(', '));
+    log('Detected wallets: ' + detectWallets().map(d=>d.name).join(', '));
   }
 
-  function getSelectedWallet() {
-    const name = walletSelect.value;
-    return detectWallets().find(w=>w.name===name);
-  }
-
-  function buildConnection() {
-    try {
-      return new solanaWeb3.Connection(HELIUS_RPC, 'confirmed');
-    } catch(e){
-      log('❌ RPC connection failed: '+e.message);
-      throw e;
-    }
-  }
+  function getSelectedWallet() { const name = walletSelect.value; return detectWallets().find(w=>w.name===name); }
+  function buildConnection() { return new solanaWeb3.Connection(HELIUS_RPC,'confirmed'); }
 
   async function connectWalletFunc(){
     clearLogs();
     const sel = getSelectedWallet();
     if(!sel){ log('❌ Select a wallet first'); return; }
-    try {
+    try{
       log('Connecting ' + sel.name + '...');
       const resp = await sel.wallet.connect();
       publicKey = resp?.publicKey || sel.wallet?.publicKey;
       if(publicKey?.toString) publicKey = publicKey.toString();
       wallet = sel.wallet;
-      log('Connected: ' + publicKey);
+      log('✅ Connected: ' + publicKey);
 
       if(!connection) connection = buildConnection();
 
-      // SOL balance
+      // SOL
       const lamports = await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
       log('💰 SOL Balance: ' + (lamports/1e9).toFixed(6) + ' SOL');
 
-      // SPL token accounts
+      // SPL tokens
       const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
         new solanaWeb3.PublicKey(publicKey),
         { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
       );
 
+      const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
+      const prices = await getTokenPrices(mints);
+
       if(!tokenAccounts?.value?.length) log('No SPL tokens found.');
       else tokenAccounts.value.forEach((t,i)=>{
         const info = t.account.data.parsed.info;
-        log(`${i+1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
+        const amount = Number(info.tokenAmount.uiAmount);
+        const usdValue = (amount * (prices[info.mint]||0)).toFixed(6);
+        log(`${i+1}. Mint: ${info.mint}, Amount: ${amount}, ~$${usdValue} USD`);
       });
-    } catch(err){ log('❌ Connect failed: '+err.message); }
+    } catch(e){ log('❌ Connect failed: '+e.message); }
   }
 
   async function disconnectWalletFunc(){
     if(!wallet){ log('❌ No wallet connected'); return; }
-    try {
-      if(wallet.disconnect) await wallet.disconnect();
-      log('Wallet disconnected');
-      wallet=null; publicKey=null;
-    } catch(err){ log('❌ Disconnect error: '+err.message); }
+    try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null; }
+    catch(err){ log('❌ Disconnect error: '+err.message); }
   }
 
   async function getTokenPrices(mints){
@@ -141,8 +135,8 @@ h2{margin:0 0 12px 0}
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mints})
     });
     const data = await res.json();
-    const map = {};
-    data.forEach(p=>map[p.mint]=p.price || 0);
+    const map={};
+    data.forEach(p=>map[p.mint]=p.price||0);
     return map;
   }
 
@@ -151,9 +145,8 @@ h2{margin:0 0 12px 0}
     clearLogs();
     log('🧹 Reclaim Rent started...');
 
-    // fetch token accounts
     let tokenAccounts;
-    try {
+    try{
       tokenAccounts = await connection.getParsedTokenAccountsByOwner(
         new solanaWeb3.PublicKey(publicKey),
         { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
@@ -162,24 +155,21 @@ h2{margin:0 0 12px 0}
 
     if(!tokenAccounts?.value?.length){ log('✅ No token accounts found.'); return; }
 
-    // query prices
     const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
-    const priceMap = await getTokenPrices(mints);
+    const prices = await getTokenPrices(mints);
 
-    // filter empty/dust
     const empty = tokenAccounts.value.filter(t=>{
-      const amount = Number(t.account.data.parsed.info.tokenAmount.uiAmount);
-      const mint = t.account.data.parsed.info.mint;
-      const price = priceMap[mint] || 0;
-      const usdValue = amount*price;
+      const info = t.account.data.parsed.info;
+      const amount = Number(info.tokenAmount.uiAmount);
+      const usdValue = amount*(prices[info.mint]||0);
       return usdValue < DUST_THRESHOLD_USD;
     });
 
     if(empty.length===0){ log('✅ No empty/dust token accounts to reclaim.'); return; }
     log(`🪣 Found ${empty.length} empty/dust token account(s). Closing...`);
 
-    for(const entry of empty){
-      const tokenPub = entry.pubkey;
+    for(const t of empty){
+      const tokenPub = t.pubkey;
       try{
         const keys=[
           {pubkey: tokenPub,isSigner:false,isWritable:true},
@@ -208,18 +198,13 @@ h2{margin:0 0 12px 0}
     log('🎉 Reclaim run complete.');
   }
 
-  // button listeners
   connectBtn.addEventListener('click', connectWalletFunc);
   disconnectBtn.addEventListener('click', disconnectWalletFunc);
   reclaimBtn.addEventListener('click', reclaimRent);
 
-  // init
   connection = buildConnection();
   populateWalletDropdown();
-  setInterval(()=>{
-    const detected = detectWallets();
-    if(detected.length + 1 !== walletSelect.options.length) populateWalletDropdown();
-  },3000);
+  setInterval(()=>{ if(detectWallets().length +1 !== walletSelect.options.length) populateWalletDropdown(); },3000);
 
 })();
 </script>
