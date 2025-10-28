@@ -1,73 +1,97 @@
-/* WalletSessionManager.js — ensures clean connect/disconnect for multiple wallets */
-
+/* walletSessionManager.js — Manage wallet sessions safely */
 class WalletSessionManager {
   constructor() {
-    this.currentWallet = null;
-    this.web3 = window.solanaWeb3 || window.web3 || window.web3js || null;
-    this.detectedWallets = [];
-    this._init();
+    this.activeWallet = null;   // The currently connected wallet object
+    this.publicKey = null;      // Base58 string of active wallet's public key
   }
 
-  _init() {
-    // Detect wallets injected in window
-    this.detectedWallets = this._detectWallets();
-  }
+  /**
+   * Connect a wallet.
+   * @param {object} walletObj - The injected wallet object (Phantom, Solflare, Slope)
+   * @returns {Promise<{wallet: object, publicKey: string}>}
+   */
+  async connect(walletObj) {
+    if (!walletObj) throw new Error('No wallet object provided');
 
-  _detectWallets() {
-    const wallets = [];
-    if (window.solana?.isPhantom) wallets.push(window.solana);
-    if (window.phantom?.solana?.isPhantom) wallets.push(window.phantom.solana);
-    if (window.solflare?.isSolflare) wallets.push(window.solflare);
-    if (window.Slope) try { wallets.push(new window.Slope()); } catch {}
-    return wallets;
-  }
-
-  async disconnectAll() {
-    for (const w of this.detectedWallets) {
-      try {
-        if (w?.disconnect) await w.disconnect();
-      } catch (e) {
-        console.warn('⚠️ Failed disconnect for wallet', w, e.message);
-      }
+    // If there is already an active wallet, disconnect it first
+    if (this.activeWallet && this.activeWallet !== walletObj) {
+      await this.disconnect();
     }
-    this.currentWallet = null;
-  }
 
-  async connect(wallet) {
-    // Force disconnect any previous session first
-    await this.disconnectAll();
-
-    if (!wallet) throw new Error('No wallet passed to connect()');
-    this.currentWallet = wallet;
-
-    // Connect and wait for public key
-    let pubkey = null;
     try {
-      if (!wallet.isConnected) {
-        const resp = await wallet.connect();
-        pubkey = resp?.publicKey?.toString?.();
+      let pubkey;
+
+      // Wallet might already be connected
+      if (walletObj.isConnected && walletObj.publicKey) {
+        pubkey = walletObj.publicKey.toString();
+      } else if (walletObj.publicKey && walletObj.publicKey.toBase58) {
+        pubkey = walletObj.publicKey.toBase58();
       } else {
-        pubkey = wallet.publicKey?.toString?.();
+        // Prompt connection
+        const resp = await walletObj.connect();
+        pubkey = resp?.publicKey?.toString() || walletObj.publicKey?.toString();
       }
-    } catch (e) {
-      throw new Error('Wallet connection failed: ' + e.message);
+
+      if (!pubkey) throw new Error('Unable to get public key from wallet');
+
+      this.activeWallet = walletObj;
+      this.publicKey = pubkey;
+
+      console.log('🟢 WalletSessionManager: Connected wallet', pubkey);
+      return { wallet: walletObj, publicKey: pubkey };
+    } catch (err) {
+      console.error('❌ WalletSessionManager: Failed to connect wallet:', err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Disconnect the currently active wallet
+   */
+  async disconnect() {
+    if (!this.activeWallet) return;
+
+    try {
+      if (this.activeWallet.disconnect) {
+        await this.activeWallet.disconnect();
+      } else if (this.activeWallet.signOut) {
+        await this.activeWallet.signOut();
+      }
+      console.log('⚪ WalletSessionManager: Disconnected wallet', this.publicKey);
+    } catch (err) {
+      console.warn('⚠️ WalletSessionManager: Error during disconnect:', err.message);
+    } finally {
+      this.activeWallet = null;
+      this.publicKey = null;
+    }
+  }
+
+  /**
+   * Disconnect all known wallets injected in window
+   */
+  async disconnectAll() {
+    const wallets = [
+      window.solana,
+      window.phantom?.solana,
+      window.solflare,
+    ];
+
+    for (const w of wallets) {
+      if (!w) continue;
+      try {
+        if (w.disconnect) await w.disconnect();
+        else if (w.signOut) await w.signOut();
+        console.log('⚪ WalletSessionManager: Disconnected', w?.publicKey?.toString() || w);
+      } catch (err) {
+        console.warn('⚠️ WalletSessionManager: Failed to disconnect wallet:', err.message);
+      }
     }
 
-    if (!pubkey) throw new Error('No public key returned from wallet');
-
-    return { wallet: this.currentWallet, publicKey: pubkey };
-  }
-
-  getActiveWallet() {
-    return this.currentWallet;
-  }
-
-  isConnected(wallet) {
-    return wallet?.isConnected || (wallet?.publicKey != null);
-  }
-
-  detectAndConnect() {
-    const active = this.detectedWallets.find(w => w.isConnected);
-    return active ? this.connect(active) : null;
+    // Clear active wallet reference
+    this.activeWallet = null;
+    this.publicKey = null;
   }
 }
+
+// Singleton instance
+window.walletSessionManager = new WalletSessionManager();
