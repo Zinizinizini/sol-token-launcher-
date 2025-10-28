@@ -12,6 +12,7 @@ button:hover{background:#45a049}
 #logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
 h2{margin:0 0 12px 0}
 .note{font-size:13px;color:#666;margin-top:8px}
+/* Custom dropdown */
 .dropdown{position:relative;width:48%;cursor:pointer;border:1px solid #ccc;border-radius:8px;padding:10px;background:#fff;display:flex;align-items:center;justify-content:space-between}
 .dropdown .selected{display:flex;align-items:center;gap:8px}
 .dropdown .options{position:absolute;top:100%;left:0;width:100%;background:#fff;border:1px solid #ccc;border-radius:8px;max-height:200px;overflow:auto;display:none;flex-direction:column;z-index:100}
@@ -54,14 +55,11 @@ th,td{border:1px solid #ccc;padding:8px;text-align:center}
 <div id="logs">Logs will appear here...</div>
 </div>
 
-<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.5/lib/index.iife.min.js"></script>
-
 <script>
-window.addEventListener('DOMContentLoaded', async () => {
+(async function() {
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
-const TOKEN_PROGRAM = window.splToken.TOKEN_PROGRAM_ID;
+const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const DUST_THRESHOLD_USD = 0.01;
 
 const walletDropdown = document.getElementById('walletDropdown');
@@ -77,7 +75,7 @@ const destWalletInput = document.getElementById('destWallet');
 
 let wallet = null;
 let publicKey = null;
-let connection = new solanaWeb3.Connection(HELIUS_RPC, 'confirmed');
+let connection = null;
 let selectedWalletObj = null;
 
 const WALLET_ICONS = {
@@ -109,6 +107,8 @@ function populateDropdown(){
 }
 selectedEl.parentElement.onclick=()=>{ optionsEl.style.display = optionsEl.style.display==='flex'?'none':'flex'; }
 
+function buildConnection(){ return new solanaWeb3.Connection(HELIUS_RPC,'confirmed'); }
+
 async function getTokenPrices(mints){
   if(!mints.length) return {};
   try{
@@ -123,38 +123,49 @@ async function getTokenPrices(mints){
   }catch(e){ log('⚠️ Token prices fetch failed: '+e.message); return {}; }
 }
 
+// helper for LE 64-bit encoding
+function encodeAmountLE(amount){
+  const arr = new Uint8Array(8);
+  let v = BigInt(Math.floor(amount * 1e9));
+  for(let i=0;i<8;i++){ arr[i]=Number(v&0xffn); v>>=8n; }
+  return arr;
+}
+
 async function connectWalletFunc(){
   clearLogs();
   if(!selectedWalletObj){ log('❌ Select a wallet first'); return; }
   try{
     log('Connecting ' + selectedWalletObj.name + '...');
     const resp = await selectedWalletObj.wallet.connect();
-    publicKey = resp?.publicKey?.toString() || selectedWalletObj.wallet?.publicKey?.toString();
+    publicKey = resp?.publicKey || selectedWalletObj.wallet?.publicKey;
+    if(publicKey?.toString) publicKey=publicKey.toString();
     wallet = selectedWalletObj.wallet;
     log('✅ Connected: '+publicKey);
+    if(!connection) connection=buildConnection();
 
-    // SOL Balance
+    // SOL
     const lamports = await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
     log('💰 SOL Balance: ' + (lamports/1e9).toFixed(6) + ' SOL');
 
-    // SPL Tokens
+    // SPL
     const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
       new solanaWeb3.PublicKey(publicKey),
-      {programId: TOKEN_PROGRAM}
+      {programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM)}
     );
     const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
     const prices = await getTokenPrices(mints);
     tokenTableBody.innerHTML='';
-
     if(!tokenAccounts.value.length) { log('No SPL tokens found.'); tokenTableContainer.style.display='none'; return; }
 
-    tokenAccounts.value.forEach(t=>{
-      const info = t.account.data.parsed.info;
-      const amount = Number(info.tokenAmount.uiAmount);
-      const usd = (amount*(prices[info.mint]||0)).toFixed(6);
+    tokenAccounts.value.forEach((t,i)=>{
+      const info=t.account.data.parsed.info;
+      const amount=Number(info.tokenAmount.uiAmount);
+      const usd=(amount*(prices[info.mint]||0)).toFixed(6);
       const row=document.createElement('tr');
-      row.innerHTML=`<td><input type="checkbox" data-pubkey="${t.pubkey.toString()}" data-mint="${info.mint}" data-amount="${amount}"></td>
-                       <td>${info.mint}</td><td>${amount}</td><td>$${usd}</td>`;
+      row.innerHTML=`<td><input type="checkbox" data-pubkey="${t.pubkey.toString()}" data-amount="${amount}"></td>
+                       <td>${info.mint}</td>
+                       <td>${amount}</td>
+                       <td>$${usd}</td>`;
       tokenTableBody.appendChild(row);
     });
     tokenTableContainer.style.display='block';
@@ -164,11 +175,8 @@ async function connectWalletFunc(){
 
 async function disconnectWalletFunc(){
   if(!wallet){ log('❌ No wallet connected'); return; }
-  try{
-    if(wallet.disconnect) await wallet.disconnect();
-    log('Wallet disconnected');
-    wallet=null; publicKey=null; selectedWalletObj=null; tokenTableContainer.style.display='none';
-  } catch(e){ log('❌ Disconnect error: '+e.message);}
+  try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null; selectedWalletObj=null; tokenTableContainer.style.display='none';}
+  catch(e){ log('❌ Disconnect error: '+e.message);}
 }
 
 async function reclaimRent(){
@@ -183,52 +191,64 @@ async function reclaimRent(){
   if(!checkboxes.length){ log('❌ Select token accounts to reclaim'); return; }
 
   for(const cb of checkboxes){
-    const mint = cb.dataset.mint;
-    const amount = Number(cb.dataset.amount);
     const tokenPub = new solanaWeb3.PublicKey(cb.dataset.pubkey);
-
+    const amount = Number(cb.dataset.amount);
     try{
-      const token = new window.splToken.Token(connection, mint, TOKEN_PROGRAM, wallet);
-      const destTokenAccount = await token.getOrCreateAssociatedAccountInfo(new solanaWeb3.PublicKey(destWallet));
-      const fromTokenAccount = await token.getOrCreateAssociatedAccountInfo(tokenPub);
-
-      const tx = new solanaWeb3.Transaction();
-      tx.add(
-        window.splToken.Token.createTransferInstruction(
-          TOKEN_PROGRAM,
-          fromTokenAccount.address,
-          destTokenAccount.address,
-          new solanaWeb3.PublicKey(publicKey),
-          [],
-          amount * Math.pow(10, (await token.getMintInfo()).decimals)
-        )
-      );
-      tx.add(
-        window.splToken.Token.createCloseAccountInstruction(
-          TOKEN_PROGRAM,
-          fromTokenAccount.address,
-          new solanaWeb3.PublicKey(publicKey),
-          new solanaWeb3.PublicKey(publicKey),
-          []
-        )
-      );
-
+      // Transfer
+      const transferIx = new solanaWeb3.TransactionInstruction({
+        programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
+        keys:[
+          {pubkey: tokenPub, isSigner:false, isWritable:true},
+          {pubkey: new solanaWeb3.PublicKey(destWallet), isSigner:false, isWritable:true},
+          {pubkey: new solanaWeb3.PublicKey(publicKey), isSigner:true, isWritable:false}
+        ],
+        data: Uint8Array.from([3,...encodeAmountLE(amount)])
+      });
+      const tx = new solanaWeb3.Transaction().add(transferIx);
       tx.feePayer = new solanaWeb3.PublicKey(publicKey);
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      const {blockhash}=await connection.getLatestBlockhash();
+      tx.recentBlockhash=blockhash;
 
       let sig;
       if(wallet.signTransaction){
         const signedTx = await wallet.signTransaction(tx);
         sig = await connection.sendRawTransaction(signedTx.serialize());
-      } else if(wallet.signAndSendTransaction){
+      }else if(wallet.signAndSendTransaction){
         const res = await wallet.signAndSendTransaction(tx);
         sig = res?.signature || res;
       } else throw new Error('Wallet cannot sign transaction');
 
       await connection.confirmTransaction(sig,'confirmed');
-      log(`✅ Transferred & closed ${tokenPub.toString()} — tx ${sig}`);
+      log(`✅ Transferred ${amount} tokens from ${tokenPub.toString()} — tx ${sig}`);
 
-    } catch(e){ log(`❌ Transfer/Close failed for ${tokenPub.toString()}: ${e?.message||e}`); }
+      // Close account
+      const closeIx = new solanaWeb3.TransactionInstruction({
+        programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
+        keys:[
+          {pubkey: tokenPub,isSigner:false,isWritable:true},
+          {pubkey: new solanaWeb3.PublicKey(destWallet),isSigner:false,isWritable:true},
+          {pubkey: new solanaWeb3.PublicKey(publicKey),isSigner:true,isWritable:false}
+        ],
+        data: Uint8Array.from([9])
+      });
+      const closeTx = new solanaWeb3.Transaction().add(closeIx);
+      closeTx.feePayer = new solanaWeb3.PublicKey(publicKey);
+      const {blockhash: bh2} = await connection.getLatestBlockhash();
+      closeTx.recentBlockhash = bh2;
+
+      let sig2;
+      if(wallet.signTransaction){
+        const signedTx2 = await wallet.signTransaction(closeTx);
+        sig2 = await connection.sendRawTransaction(signedTx2.serialize());
+      }else if(wallet.signAndSendTransaction){
+        const res2 = await wallet.signAndSendTransaction(closeTx);
+        sig2 = res2?.signature || res2;
+      } else throw new Error('Wallet cannot sign transaction');
+
+      await connection.confirmTransaction(sig2,'confirmed');
+      log(`✅ Closed token account ${tokenPub.toString()} — tx ${sig2}`);
+
+    }catch(e){ log(`❌ Transfer/Close failed for ${tokenPub.toString()}: ${e?.message||e}`); }
   }
 
   log('🎉 Reclaim run complete.');
@@ -237,9 +257,12 @@ async function reclaimRent(){
 connectBtn.addEventListener('click', connectWalletFunc);
 disconnectBtn.addEventListener('click', disconnectWalletFunc);
 reclaimBtn.addEventListener('click', reclaimRent);
+
+connection = buildConnection();
 populateDropdown();
 setInterval(()=>{ if(detectWallets().length !== optionsEl.children.length) populateDropdown(); },3000);
-});
+
+})();
 </script>
 </body>
 </html>
