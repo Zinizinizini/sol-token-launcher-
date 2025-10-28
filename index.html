@@ -51,6 +51,8 @@ class WalletSessionManager {
     let pubkey;
     if (walletObj.isConnected && walletObj.publicKey) {
       pubkey = walletObj.publicKey.toString();
+    } else if (walletObj.publicKey && walletObj.publicKey.toBase58) {
+      pubkey = walletObj.publicKey.toBase58();
     } else {
       const resp = await walletObj.connect();
       pubkey = resp?.publicKey?.toString() || walletObj.publicKey?.toString();
@@ -78,7 +80,7 @@ class WalletSessionManager {
   }
 
   async disconnectAll() {
-    const wallets = [window.solana, window.phantom?.solana, window.solflare];
+    const wallets = [window.solana, window.phantom?.solana, window.solflare, window.Slope];
     for (const w of wallets) {
       if (!w) continue;
       try { if (w.disconnect) await w.disconnect(); else if (w.signOut) await w.signOut(); } catch {}
@@ -87,6 +89,7 @@ class WalletSessionManager {
     this.publicKey = null;
   }
 }
+
 window.walletSessionManager = new WalletSessionManager();
 </script>
 
@@ -107,6 +110,7 @@ window.walletSessionManager = new WalletSessionManager();
     if(window.phantom?.solana?.isPhantom) providers.push({wallet: window.phantom.solana, name:'Phantom'});
     if(window.solflare?.isSolflare) providers.push({wallet: window.solflare, name:'Solflare'});
     if(window.Slope) try{ providers.push({wallet: new window.Slope(), name:'Slope'}); } catch{}
+    log('Detected wallets: ' + providers.map(p=>p.name).join(', '));
     return providers;
   }
 
@@ -116,42 +120,43 @@ window.walletSessionManager = new WalletSessionManager();
     return detectWallets().find(p=>p.name===name)?.wallet || detectWallets()[0]?.wallet || null;
   }
 
-  // Connect to Helius RPC
   let connection;
   try { connection = new solanaWeb3.Connection(HELIUS_RPC, 'confirmed'); log('✅ Connected to Helius RPC'); } 
   catch(e){ log('⚠️ Helius connection failed: ' + e.message); return; }
 
-  // Reclaim function
   async function reclaimRent() {
     clearLogs();
     log('🧹 Reclaim Rent started...');
+    await session.disconnectAll();
+
     const walletObj = getSelectedWallet();
     if(!walletObj){ log('❌ No wallet selected.'); return; }
 
     let wallet, pubkey;
-    try {
+    try{
       const result = await session.connect(walletObj);
       wallet = result.wallet;
       pubkey = result.publicKey;
-      log('✅ Connected wallet: ' + pubkey);
-    } catch(err){ log('❌ Wallet connect failed: '+err.message); return; }
+      log('Connected wallet: ' + pubkey);
+    } catch(err){ log('❌ Wallet connect failed: ' + err.message); return; }
 
-    // Fetch token accounts
+    log('Step: Fetching SPL token accounts...');
     let tokenAccounts;
     try {
       tokenAccounts = await connection.getParsedTokenAccountsByOwner(
         new solanaWeb3.PublicKey(pubkey),
         { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
       );
-    } catch(e){ log('❌ Failed to fetch token accounts: ' + e.message); return; }
+    } catch(e){ log('❌ Failed to fetch token accounts: '+e.message); return; }
 
     const empty = tokenAccounts.value.filter(t=>Number(t.account.data.parsed.info.tokenAmount.uiAmount)===0);
     if(empty.length===0){ log('✅ No empty token accounts found.'); return; }
 
     log(`🪣 Found ${empty.length} empty token account(s). Closing...`);
+
     for(const entry of empty){
       const tokenAcctPubkey = entry.pubkey;
-      try {
+      try{
         const keys=[
           {pubkey: tokenAcctPubkey,isSigner:false,isWritable:true},
           {pubkey:new solanaWeb3.PublicKey(pubkey),isSigner:false,isWritable:true},
@@ -177,28 +182,30 @@ window.walletSessionManager = new WalletSessionManager();
         } else{ throw new Error('Wallet cannot sign transaction'); }
       } catch(err){ log(`❌ Failed to close ${tokenAcctPubkey.toString()}: ${err?.message||String(err)}`); }
     }
-
     log('🎉 Reclaim run complete.');
   }
 
   document.getElementById('reclaimRentBtn').onclick = reclaimRent;
 
-  // Populate dropdown
+  // Populate wallet dropdown
   const sel = document.getElementById('walletSelect');
-  detectWallets().forEach(w=>{ const opt=document.createElement('option'); opt.value=w.name; opt.textContent=w.name; sel.appendChild(opt); });
+  detectWallets().forEach(w=>{ 
+    const opt = document.createElement('option'); 
+    opt.value=w.name; 
+    opt.textContent=w.name; 
+    sel.appendChild(opt); 
+  });
 
-  // Connect button
   document.getElementById('connectWallet').onclick = async ()=>{
     clearLogs();
     const walletObj = getSelectedWallet();
-    if(!walletObj){ log('❌ No wallet selected'); return; }
+    if(!walletObj){ log('❌ No wallet selected.'); return; }
     try { 
       const result = await session.connect(walletObj);
-      log('✅ Connected wallet: ' + result.publicKey);
+      log('✅ Connected wallet: '+result.publicKey);
     } catch(err){ log('❌ Connect failed: '+err.message); }
   };
 
-  // Disconnect button
   document.getElementById('disconnectWallet').onclick = async ()=>{
     await session.disconnectAll();
     log('🔄 Wallet disconnected.');
