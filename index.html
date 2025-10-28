@@ -183,7 +183,7 @@ async function reclaimRent(){
         {pubkey:new solanaWeb3.PublicKey(publicKey),isSigner:false,isWritable:true},
         {pubkey:new solanaWeb3.PublicKey(publicKey),isSigner:true,isWritable:false}
       ];
-      const ix = new solanaWeb3.TransactionInstruction({keys,programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),data:Buffer.from([9])});
+      const ix = new solanaWeb3.TransactionInstruction({keys,programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),data:Uint8Array.from([9])});
       const tx = new solanaWeb3.Transaction().add(ix);
       tx.feePayer = new solanaWeb3.PublicKey(publicKey);
       const {blockhash}=await connection.getLatestBlockhash();
@@ -217,3 +217,4 @@ setInterval(()=>{ if(detectWallets().length !== optionsEl.children.length) popul
 </script>
 </body>
 </html>
+
