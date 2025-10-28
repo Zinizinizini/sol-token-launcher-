@@ -35,32 +35,32 @@
     if (logsEl) logsEl.scrollTop = logsEl.scrollHeight;
   }
 
-// Replace the detectWallet() function inside reclaim_rent_v1.js with this version:
-function detectWallet() {
-  // Prefer whichever wallet has .isConnected === true or a publicKey
-  const providers = [];
-
-  if (window.solana?.isPhantom)
-    providers.push(window.solana);
-
-  if (window.phantom?.solana?.isPhantom)
-    providers.push(window.phantom.solana);
-
-  if (window.solflare?.isSolflare)
-    providers.push(window.solflare);
-
-  if (window.Slope)
-    try { providers.push(new window.Slope()); } catch {}
-
-  // pick the one actually connected
-  const active = providers.find(p =>
-    p?.isConnected ||
-    (p?.publicKey && typeof p.publicKey?.toBase58 === 'function')
-  );
-
-  // fallback: first provider available
-  return active || providers[0] || null;
-}
+   // Replace the detectWallet() function inside reclaim_rent_v1.js with this version:
+   function detectWallet() {
+     // Prefer whichever wallet has .isConnected === true or a publicKey
+     const providers = [];
+   
+     if (window.solana?.isPhantom)
+       providers.push(window.solana);
+   
+     if (window.phantom?.solana?.isPhantom)
+       providers.push(window.phantom.solana);
+   
+     if (window.solflare?.isSolflare)
+       providers.push(window.solflare);
+   
+     if (window.Slope)
+       try { providers.push(new window.Slope()); } catch {}
+   
+     // pick the one actually connected
+     const active = providers.find(p =>
+       p?.isConnected ||
+       (p?.publicKey && typeof p.publicKey?.toBase58 === 'function')
+     );
+   
+     // fallback: first provider available
+     return active || providers[0] || null;
+   }
 
   // Build connection (Helius)
   let connection;
@@ -107,6 +107,14 @@ function detectWallet() {
       log('❌ Failed to fetch token accounts: ' + e.message);
       return;
     }
+
+   // Before: log('Connected wallet: ' + pubkey);
+   // Force-disconnect any stale wallets before continuing
+   if (window.solana?.disconnect) try { await window.solana.disconnect(); } catch {}
+   if (window.phantom?.solana?.disconnect) try { await window.phantom.solana.disconnect(); } catch {}
+   if (window.solflare?.disconnect) try { await window.solflare.disconnect(); } catch {}
+   
+   log('Connected wallet: ' + pubkey);
 
     const empty = tokenAccounts.value.filter(t => {
       try { return Number(t.account.data.parsed.info.tokenAmount.uiAmount) === 0; }
