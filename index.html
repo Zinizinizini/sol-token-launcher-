@@ -1,45 +1,243 @@
-<script>
-async function connectWalletFunc() {
-  logsEl.innerText = '';
-  wallet = getSelectedWallet();
-  if (!wallet) {
-    logStep('❌ Please select a wallet first.');
-    return;
-  }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Universal Solana Wallet DApp (Helius)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:40px;background:#f0f2f5}
+  #walletApp{max-width:700px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
+  select,button{width:48%;padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5px}
+  button{background:#4caf50;color:#fff}
+  button:hover{background:#45a049}
+  #logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
+  h2{margin:0 0 12px 0}
+  .note{font-size:13px;color:#666;margin-top:8px}
+</style>
+</head>
+<body>
+  <div id="walletApp">
+    <h2>Universal Solana Wallet DApp (Helius)</h2>
 
-  try {
-    logStep(`Selected wallet: ${wallet.name}`);
-    logStep('Step 1: Connecting wallet...');
-    const resp = await wallet.wallet.connect();
-    publicKey = resp?.publicKey || wallet.wallet.publicKey;
-    logStep('Connected: ' + publicKey.toString());
+    <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px">
+      <select id="walletSelect"><option value="">Select Wallet</option></select>
+    </div>
 
-    logStep('Step 2: Creating Solana connection via Helius...');
-    const connection = new web3.Connection(
-      'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775',
-      'confirmed'
-    );
+    <div style="text-align:center">
+      <button id="connectWallet">Connect Wallet</button>
+      <button id="disconnectWallet">Disconnect Wallet</button>
+    </div>
 
-    logStep('Step 3: Fetching SOL balance...');
-    const lamports = await connection.getBalance(publicKey);
-    logStep('💰 SOL Balance: ' + (lamports / 1e9).toFixed(6) + ' SOL');
+    <div class="note">Using Helius RPC (demo key) — do not commit private keys to public repos.</div>
 
-    logStep('Step 4: Fetching SPL tokens...');
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-      publicKey,
-      { programId: new web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") }
-    );
+    <div id="logs">Logs will appear here...</div>
+  </div>
 
-    if (tokenAccounts.value.length === 0) logStep('No SPL tokens found.');
-    else tokenAccounts.value.forEach((t, i) => {
-      const info = t.account.data.parsed.info;
-      logStep(`${i + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
-    });
+  <!-- IIFE browser bundle (global). This is compatible with wallet extensions injecting into window. -->
+  <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
-    logStep('✅ Wallet connection complete.');
-  } catch (err) {
-    logStep('❌ Error: ' + err.message);
-    console.error(err);
-  }
-}
-</script>
+  <script>
+  (function () {
+    // ---------- CONFIG ----------
+    // Your Helius RPC (user-provided). Replace here if you rotate key.
+    const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
+    // Fallback public RPC (only if Helius fails)
+    const FALLBACK_RPC = 'https://solana-api.projectserum.com';
+    // ----------------------------
+
+    const logsEl = document.getElementById('logs');
+    const walletSelect = document.getElementById('walletSelect');
+    const connectBtn = document.getElementById('connectWallet');
+    const disconnectBtn = document.getElementById('disconnectWallet');
+
+    let wallet = null;
+    let publicKey = null;
+    let connection = null;
+
+    function logStep(msg) {
+      console.log(msg);
+      logsEl.innerText += msg + '\n';
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    // Wait for web3 global to exist (robust across CDN variants)
+    function waitForWeb3(timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        const start = Date.now();
+        (function poll() {
+          const g = window.solanaWeb3 || window.web3 || window.web3js || window.solanaWeb3js;
+          if (g) return resolve(g);
+          if (Date.now() - start > timeoutMs) return reject(new Error('web3 global not found'));
+          setTimeout(poll, 150);
+        })();
+      });
+    }
+
+    // Detect wallets injected into window
+    function detectWallets() {
+      const out = [];
+      // Phantom typically exposes window.phantom.solana and window.solana
+      if (window.phantom?.solana?.isPhantom) out.push({ wallet: window.phantom.solana, name: 'Phantom' });
+      // Many wallets also expose window.solana (Phantom included), so we also check generic window.solana
+      if (window.solana && window.solana.isPhantom && !out.find(x=>x.name==='Phantom')) out.push({ wallet: window.solana, name: 'Phantom' });
+      // Solflare
+      if (window.solflare && window.solflare.isSolflare) out.push({ wallet: window.solflare, name: 'Solflare' });
+      // Slope
+      if (window.Slope) {
+        try { out.push({ wallet: new window.Slope(), name: 'Slope' }); } catch(e) { /* ignore */ }
+      }
+      return out;
+    }
+
+    function populateWalletDropdown() {
+      walletSelect.innerHTML = '<option value="">Select Wallet</option>';
+      const detected = detectWallets();
+      detected.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.name;
+        opt.textContent = w.name;
+        walletSelect.appendChild(opt);
+      });
+      if (detected.length === 0) {
+        logStep('❌ No wallets detected. Install Phantom, Solflare, or Slope and refresh the page.');
+      } else {
+        logStep('Detected wallets: ' + detected.map(d => d.name).join(', '));
+      }
+    }
+
+    function getSelectedWallet() {
+      const name = walletSelect.value;
+      return detectWallets().find(w => w.name === name);
+    }
+
+    // Build connection using Helius (preferred) with fallback
+    function buildConnection(web3Global) {
+      try {
+        return new web3Global.Connection(HELIUS_RPC, 'confirmed');
+      } catch (e) {
+        logStep('⚠️ Helius constructor failed, falling back to public RPC: ' + e.message);
+      }
+      try {
+        const g = window.solanaWeb3 || window.web3 || window.web3js || window.solanaWeb3js;
+        return new g.Connection(FALLBACK_RPC, 'confirmed');
+      } catch (e) {
+        logStep('❌ Unable to create RPC connection: ' + e.message);
+        throw e;
+      }
+    }
+
+    async function init() {
+      try {
+        const web3Global = await waitForWeb3(7000).catch(err => {
+          logStep('⚠️ web3 global not auto-detected within timeout; attempting to read window globals anyway.');
+          return window.solanaWeb3 || window.web3 || window.web3js || window.solanaWeb3js;
+        });
+        if (!web3Global) {
+          logStep('❌ Solana web3 global not found. Confirm the CDN script loaded and you have connectivity.');
+          return;
+        }
+        logStep('✅ Solana web3 bundle available.');
+        // create connection using Helius
+        connection = buildConnection(web3Global);
+        logStep('✅ RPC connection ready (Helius).');
+        // populate wallets
+        populateWalletDropdown();
+      } catch (err) {
+        logStep('❌ Init error: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    // Connect wallet, fetch balance & tokens
+    async function connectWalletFunc() {
+      logsEl.innerText = '';
+      wallet = getSelectedWallet();
+      if (!wallet) {
+        logStep('❌ Please select a wallet first from the dropdown.');
+        return;
+      }
+
+      try {
+        logStep('Selected wallet: ' + wallet.name);
+        logStep('Step 1: Opening wallet connect prompt...');
+        // Many wallets expose connect as wallet.connect() (Phantom/Solflare)
+        const resp = await wallet.wallet.connect();
+        // response shapes vary: prefer resp.publicKey, else wallet.wallet.publicKey
+        publicKey = resp?.publicKey || wallet.wallet?.publicKey || resp?.publicKey?.toString && resp.publicKey;
+        // normalize to string if PublicKey object
+        if (publicKey && publicKey.toString) publicKey = publicKey.toString();
+        if (!publicKey) throw new Error('No public key returned by wallet.');
+        logStep('Connected: ' + publicKey);
+
+        if (!connection) {
+          // attempt to (re)build connection from any global
+          const g = window.solanaWeb3 || window.web3 || window.web3js || window.solanaWeb3js;
+          connection = buildConnection(g);
+        }
+        logStep('Step 2: Fetching SOL balance via Helius RPC...');
+        const lamports = await connection.getBalance(new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey));
+        logStep('💰 SOL Balance: ' + (lamports / 1e9).toFixed(6) + ' SOL');
+
+        logStep('Step 3: Fetching SPL token accounts...');
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+          new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey(publicKey),
+          { programId: new (window.solanaWeb3 || window.web3 || window.web3js).PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+        );
+
+        if (!tokenAccounts || !tokenAccounts.value || tokenAccounts.value.length === 0) {
+          logStep('No SPL tokens found.');
+        } else {
+          tokenAccounts.value.forEach((t, i) => {
+            try {
+              const info = t.account.data.parsed.info;
+              logStep(`${i + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
+            } catch (e) {
+              // some parsed structures differ; just log raw entry if parsing fails
+              logStep(`${i + 1}. Token account (raw): ${JSON.stringify(t)}`);
+            }
+          });
+        }
+        logStep('✅ Wallet connection & data fetch complete.');
+      } catch (err) {
+        logStep('❌ Error: ' + (err?.message || String(err)));
+        console.error(err);
+      }
+    }
+
+    // Disconnect
+    async function disconnectWalletFunc() {
+      if (!wallet) {
+        logStep('❌ No wallet connected.');
+        return;
+      }
+      try {
+        // many wallet objects expose wallet.disconnect()
+        await wallet.wallet.disconnect();
+        logStep('Wallet ' + wallet.name + ' disconnected.');
+        wallet = null;
+        publicKey = null;
+      } catch (err) {
+        logStep('❌ Error disconnecting: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    // wire buttons
+    connectBtn.addEventListener('click', connectWalletFunc);
+    disconnectBtn.addEventListener('click', disconnectWalletFunc);
+
+    // init
+    init();
+
+    // Optional: refresh detection periodically to capture wallets installed after load
+    setInterval(() => {
+      const had = walletSelect.options.length;
+      const detected = detectWallets();
+      if (detected.length + 1 !== had) { // +1 for the placeholder option
+        populateWalletDropdown();
+      }
+    }, 3000);
+  })();
+  </script>
+</body>
+</html>
