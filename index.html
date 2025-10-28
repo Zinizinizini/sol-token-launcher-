@@ -1,157 +1,192 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Universal Solana Wallet DApp</title>
-<style>
-body { font-family: Arial; display:flex; justify-content:center; padding:50px; background:#f0f2f5; }
-#walletApp { max-width:600px; width:100%; padding:20px; background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center; }
-select, button { width:48%; padding:12px; border:none; border-radius:8px; font-size:16px; cursor:pointer; margin:5px; }
-button { background:#4caf50; color:white; }
-button:hover { background:#45a049; }
-#logs { margin-top:10px; padding:10px; border-radius:8px; background:#e8f4fd; text-align:left; white-space:pre-wrap; max-height:400px; overflow-y:auto; }
-</style>
+  <meta charset="UTF-8">
+  <title>Universal Solana Wallet DApp</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 50px;
+      background: #f0f2f5;
+    }
+    #walletApp {
+      max-width: 600px;
+      width: 100%;
+      padding: 20px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    select, button {
+      width: 48%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button {
+      background: #4caf50;
+      color: white;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    #logs {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #e8f4fd;
+      text-align: left;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
 </head>
 <body>
-<div id="walletApp">
-  <h2>Universal Solana Wallet DApp</h2>
-  <select id="walletSelect">
-    <option value="">Select Wallet</option>
-  </select>
-  <div>
-    <button id="connectWallet">Connect Wallet</button>
-    <button id="disconnectWallet">Disconnect Wallet</button>
+  <div id="walletApp">
+    <h2>Universal Solana Wallet DApp</h2>
+    <select id="walletSelect">
+      <option value="">Select Wallet</option>
+    </select>
+    <div>
+      <button id="connectWallet">Connect Wallet</button>
+      <button id="disconnectWallet">Disconnect Wallet</button>
+    </div>
+    <div id="logs">Logs will appear here...</div>
   </div>
-  <div id="logs">Logs will appear here...</div>
-</div>
 
-<!-- Solana Web3.js -->
-<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/lib/index.iife.min.js"></script>
+  <!-- ✅ Use ESM version of Solana Web3.js -->
+  <script type="module">
+    import {
+      Connection,
+      clusterApiUrl,
+      PublicKey
+    } from "https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/+esm";
 
-<script type="module">
-import { Connection, clusterApiUrl, PublicKey } from "https://cdn.jsdelivr.net/npm/@solana/web3.js@1.77.0/+esm";
+    const logsEl = document.getElementById('logs');
+    const walletSelect = document.getElementById('walletSelect');
+    const connectBtn = document.getElementById('connectWallet');
+    const disconnectBtn = document.getElementById('disconnectWallet');
 
-const logsEl = document.getElementById('logs');
-const walletSelect = document.getElementById('walletSelect');
-const connectBtn = document.getElementById('connectWallet');
-const disconnectBtn = document.getElementById('disconnectWallet');
+    let wallet = null;
+    let publicKey = null;
 
-let wallet = null;
-let publicKey = null;
-
-function logStep(msg) {
-  logsEl.textContent += msg + '\n';
-  logsEl.scrollTop = logsEl.scrollHeight;
-}
-
-// --- Wallet detection ---
-function detectWallets() {
-  const detected = [];
-
-  if (window.phantom?.solana?.isPhantom)
-    detected.push({ wallet: window.phantom.solana, name: 'Phantom' });
-  if (window.solflare?.isSolflare)
-    detected.push({ wallet: window.solflare, name: 'Solflare' });
-  if (window.Slope)
-    detected.push({ wallet: new window.Slope(), name: 'Slope' });
-
-  return detected;
-}
-
-function populateWalletDropdown() {
-  const detectedWallets = detectWallets();
-  detectedWallets.forEach(w => {
-    const option = document.createElement('option');
-    option.value = w.name;
-    option.text = w.name;
-    walletSelect.appendChild(option);
-  });
-
-  if (detectedWallets.length === 0) {
-    logStep('❌ No wallets detected. Please install Phantom, Solflare, or Slope.');
-  } else {
-    logStep(`Detected wallets: ${detectedWallets.map(w => w.name).join(', ')}`);
-  }
-}
-
-populateWalletDropdown();
-
-function getSelectedWallet() {
-  const selectedName = walletSelect.value;
-  const detectedWallets = detectWallets();
-  return detectedWallets.find(w => w.name === selectedName);
-}
-
-// --- Connect wallet ---
-async function connectWalletFunc() {
-  logsEl.textContent = '';
-  wallet = getSelectedWallet();
-  if (!wallet) {
-    logStep('❌ Please select a wallet first from the dropdown.');
-    alert('Select a wallet from the dropdown!');
-    return;
-  }
-
-  try {
-    logStep(`Selected wallet: ${wallet.name}`);
-    logStep('Step 1: Connecting wallet...');
-
-    if (wallet.name === 'Slope') {
-      await wallet.wallet.connect();
-      publicKey = new PublicKey(wallet.wallet.publicKey);
-    } else {
-      const resp = await wallet.wallet.connect({ onlyIfTrusted: false });
-      publicKey = resp.publicKey || wallet.wallet.publicKey;
+    function logStep(msg) {
+      logsEl.textContent += msg + '\n';
+      logsEl.scrollTop = logsEl.scrollHeight;
     }
 
-    logStep(`Connected: ${publicKey.toString()}`);
+    // Detect wallets dynamically
+    function detectWallets() {
+      const detected = [];
+      if (window.phantom?.solana?.isPhantom)
+        detected.push({ wallet: window.phantom.solana, name: 'Phantom' });
+      if (window.solflare?.isSolflare)
+        detected.push({ wallet: window.solflare, name: 'Solflare' });
+      if (window.Slope)
+        detected.push({ wallet: new window.Slope(), name: 'Slope' });
+      return detected;
+    }
 
-    logStep('Step 2: Creating Solana connection...');
-    const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
+    // Populate dropdown
+    function populateWalletDropdown() {
+      const detectedWallets = detectWallets();
+      detectedWallets.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.name;
+        opt.textContent = w.name;
+        walletSelect.appendChild(opt);
+      });
 
-    logStep('Step 3: Fetching SOL balance...');
-    const lamports = await connection.getBalance(publicKey);
-    logStep(`SOL Balance: ${(lamports / 1e9).toFixed(6)} SOL`);
+      if (detectedWallets.length === 0) {
+        logStep('❌ No wallets detected. Please install Phantom, Solflare, or Slope.');
+      } else {
+        logStep(`Detected wallets: ${detectedWallets.map(w => w.name).join(', ')}`);
+      }
+    }
 
-    logStep('Step 4: Fetching SPL tokens...');
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-      publicKey,
-      { programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") }
-    );
+    // Run on page load
+    window.addEventListener('load', populateWalletDropdown);
 
-    if (tokenAccounts.value.length === 0) logStep('No SPL tokens found.');
-    else tokenAccounts.value.forEach((t, i) => {
-      const info = t.account.data.parsed.info;
-      logStep(`${i + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
-    });
+    function getSelectedWallet() {
+      const selected = walletSelect.value;
+      return detectWallets().find(w => w.name === selected);
+    }
 
-    logStep('✅ Wallet connection complete.');
-  } catch (err) {
-    logStep('❌ Error: ' + err.message);
-    console.error(err);
-  }
-}
+    // Connect wallet
+    async function connectWalletFunc() {
+      logsEl.textContent = '';
+      wallet = getSelectedWallet();
+      if (!wallet) {
+        logStep('❌ Please select a wallet first.');
+        alert('Select a wallet from the dropdown!');
+        return;
+      }
 
-// --- Disconnect ---
-async function disconnectWalletFunc() {
-  if (!wallet || !publicKey) {
-    logStep('❌ No wallet connected.');
-    return;
-  }
-  try {
-    await wallet.wallet.disconnect();
-    logStep(`Wallet ${wallet.name} disconnected.`);
-    wallet = null;
-    publicKey = null;
-  } catch (err) {
-    logStep('❌ Error disconnecting: ' + err.message);
-    console.error(err);
-  }
-}
+      try {
+        logStep(`Selected wallet: ${wallet.name}`);
+        logStep('Step 1: Connecting wallet...');
 
-connectBtn.addEventListener('click', connectWalletFunc);
-disconnectBtn.addEventListener('click', disconnectWalletFunc);
-</script>
+        const resp = await wallet.wallet.connect({ onlyIfTrusted: false });
+        publicKey = resp.publicKey || wallet.wallet.publicKey;
+        logStep(`Connected: ${publicKey.toString()}`);
+
+        logStep('Step 2: Creating Solana connection...');
+        const connection = new Connection(clusterApiUrl('mainnet-beta'), 'confirmed');
+
+        logStep('Step 3: Fetching SOL balance...');
+        const lamports = await connection.getBalance(publicKey);
+        logStep(`SOL Balance: ${(lamports / 1e9).toFixed(6)} SOL`);
+
+        logStep('Step 4: Fetching SPL tokens...');
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+          publicKey,
+          { programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") }
+        );
+
+        if (tokenAccounts.value.length === 0) {
+          logStep('No SPL tokens found.');
+        } else {
+          tokenAccounts.value.forEach((t, i) => {
+            const info = t.account.data.parsed.info;
+            logStep(`${i + 1}. Mint: ${info.mint}, Amount: ${info.tokenAmount.uiAmountString}`);
+          });
+        }
+
+        logStep('✅ Wallet connection complete.');
+      } catch (err) {
+        logStep('❌ Error: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    // Disconnect wallet
+    async function disconnectWalletFunc() {
+      if (!wallet) {
+        logStep('❌ No wallet connected.');
+        return;
+      }
+      try {
+        await wallet.wallet.disconnect();
+        logStep(`Wallet ${wallet.name} disconnected.`);
+        wallet = null;
+        publicKey = null;
+      } catch (err) {
+        logStep('❌ Error disconnecting: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    connectBtn.addEventListener('click', connectWalletFunc);
+    disconnectBtn.addEventListener('click', disconnectWalletFunc);
+  </script>
 </body>
 </html>
-
