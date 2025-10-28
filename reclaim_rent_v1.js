@@ -1,22 +1,23 @@
-/* reclaim_rent_v1.js — Standalone browser plugin
+/* reclaim_rent_v1.1.js — Standalone browser plugin
    Drop this file into your repo and load it AFTER your base HTML (below the base scripts).
 */
 
 (async function(){
-  console.log('🔧 ReclaimRent Module (standalone) loaded');
+  console.log('🔧 ReclaimRent Module v1.1 loaded');
 
-  // CONFIG: uses same Helius key you used in base (change if you rotate)
+  // CONFIG
   const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
   const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const WAIT_MS = 150;
 
   // Helper: safe wait
   const wait = (ms)=> new Promise(r=>setTimeout(r,ms));
 
-  // Wait for web3 global to show up (IIFE build)
+  // Wait for web3 global to show up
   let web3Global = window.solanaWeb3 || window.web3 || window.web3js || null;
   const waitStart = Date.now();
   while(!web3Global && (Date.now() - waitStart) < 7000) {
-    await wait(150);
+    await wait(WAIT_MS);
     web3Global = window.solanaWeb3 || window.web3 || window.web3js || null;
   }
   if (!web3Global) {
@@ -25,63 +26,64 @@
   }
   const web3 = web3Global;
 
-  // DOM elements we will reuse
-  const logsEl = document.getElementById('logs') || (function(){ const d=document.createElement('div'); d.id='logs'; document.body.appendChild(d); return d; })();
-  const app = document.getElementById('walletApp') || document.body;
+  // DOM elements
+  const logsEl = document.getElementById('logs') || (function(){
+    const d=document.createElement('div'); d.id='logs'; document.body.appendChild(d); return d;
+  })();
+
+  function clearLogs() {
+    if (logsEl) logsEl.innerText = '';
+  }
 
   function log(msg){
     console.log(msg);
-    if (logsEl) logsEl.innerText += msg + '\n';
-    if (logsEl) logsEl.scrollTop = logsEl.scrollHeight;
+    if (logsEl) {
+      logsEl.innerText += msg + '\n';
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
   }
 
-   // Replace the detectWallet() function inside reclaim_rent_v1.js with this version:
-   function detectWallet() {
-     // Prefer whichever wallet has .isConnected === true or a publicKey
-     const providers = [];
-   
-     if (window.solana?.isPhantom)
-       providers.push(window.solana);
-   
-     if (window.phantom?.solana?.isPhantom)
-       providers.push(window.phantom.solana);
-   
-     if (window.solflare?.isSolflare)
-       providers.push(window.solflare);
-   
-     if (window.Slope)
-       try { providers.push(new window.Slope()); } catch {}
-   
-     // pick the one actually connected
-     const active = providers.find(p =>
-       p?.isConnected ||
-       (p?.publicKey && typeof p.publicKey?.toBase58 === 'function')
-     );
-   
-     // fallback: first provider available
-     return active || providers[0] || null;
-   }
+  // Detect active wallet
+  function detectWallet() {
+    const providers = [];
+    if (window.solana?.isPhantom) providers.push(window.solana);
+    if (window.phantom?.solana?.isPhantom) providers.push(window.phantom.solana);
+    if (window.solflare?.isSolflare) providers.push(window.solflare);
+    if (window.Slope) try { providers.push(new window.Slope()); } catch {}
+    // pick the wallet actually connected
+    const active = providers.find(p => p?.isConnected || (p?.publicKey && typeof p.publicKey?.toBase58 === 'function'));
+    return active || providers[0] || null;
+  }
 
-  // Build connection (Helius)
+  // Build Helius connection
   let connection;
   try {
     connection = new web3.Connection(HELIUS_RPC, 'confirmed');
-    log('✅ ReclaimRent: connected to Helius RPC.');
+    log('✅ ReclaimRent v1.1: connected to Helius RPC.');
   } catch (e) {
-    log('⚠️ ReclaimRent: failed to create Helius connection: ' + e.message);
+    log('⚠️ Failed to create Helius connection: ' + e.message);
     return;
+  }
+
+  // Force disconnect any stale wallets
+  async function disconnectAllWallets() {
+    if (window.solana?.disconnect) try { await window.solana.disconnect(); } catch {}
+    if (window.phantom?.solana?.disconnect) try { await window.phantom.solana.disconnect(); } catch {}
+    if (window.solflare?.disconnect) try { await window.solflare.disconnect(); } catch {}
   }
 
   // Main reclaim function
   async function reclaimRent() {
+    clearLogs();
     log('🧹 Reclaim Rent started...');
-    const wallet = detectWallet();
-    if (!wallet) { log('❌ No wallet detected. Install/enable Phantom or Solflare and reload.'); return; }
 
-    // Ensure user is connected (if not, prompt)
+    await disconnectAllWallets();
+
+    const wallet = detectWallet();
+    if (!wallet) { log('❌ No wallet detected. Install/enable Phantom or Solflare.'); return; }
+
     let pubkey;
     try {
-      // some wallets expose isConnected; try to get publicKey
       pubkey = wallet.publicKey?.toString?.() || null;
       if (!pubkey) {
         log('🔐 Prompting wallet for connection...');
@@ -108,14 +110,6 @@
       return;
     }
 
-   // Before: log('Connected wallet: ' + pubkey);
-   // Force-disconnect any stale wallets before continuing
-   if (window.solana?.disconnect) try { await window.solana.disconnect(); } catch {}
-   if (window.phantom?.solana?.disconnect) try { await window.phantom.solana.disconnect(); } catch {}
-   if (window.solflare?.disconnect) try { await window.solflare.disconnect(); } catch {}
-   
-   log('Connected wallet: ' + pubkey);
-
     const empty = tokenAccounts.value.filter(t => {
       try { return Number(t.account.data.parsed.info.tokenAmount.uiAmount) === 0; }
       catch { return false; }
@@ -126,22 +120,20 @@
       return;
     }
 
-    log(`🪣 Found ${empty.length} empty token account(s). Attempting to close them one-by-one...`);
+    log(`🪣 Found ${empty.length} empty token account(s). Closing...`);
 
-    // For each empty account, build a closeAccount instruction and send via wallet
     for (const entry of empty) {
       const tokenAcctPubkey = entry.pubkey;
       try {
-        // Build close instruction manually (SPL Token close account = 9)
         const keys = [
           { pubkey: tokenAcctPubkey, isSigner: false, isWritable: true },
-          { pubkey: new web3.PublicKey(pubkey), isSigner: false, isWritable: true }, // dest
-          { pubkey: new web3.PublicKey(pubkey), isSigner: true, isWritable: false } // authority
+          { pubkey: new web3.PublicKey(pubkey), isSigner: false, isWritable: true },
+          { pubkey: new web3.PublicKey(pubkey), isSigner: true, isWritable: false }
         ];
         const ix = new web3.TransactionInstruction({
           keys,
           programId: new web3.PublicKey(TOKEN_PROGRAM),
-          data: Buffer.from([9]) // CloseAccount instruction index
+          data: Buffer.from([9])
         });
 
         const tx = new web3.Transaction().add(ix);
@@ -149,18 +141,14 @@
         const { blockhash } = await connection.getLatestBlockhash();
         tx.recentBlockhash = blockhash;
 
-        // Sign via injected wallet. Different wallets expose different APIs:
-        // Phantom/Solflare: wallet.signTransaction(tx) or wallet.signAndSendTransaction
         let signedTx;
         if (wallet.signTransaction) {
           signedTx = await wallet.signTransaction(tx);
-          // send raw
           const raw = signedTx.serialize();
           const sig = await connection.sendRawTransaction(raw);
           await connection.confirmTransaction(sig, 'confirmed');
           log(`✅ Closed ${tokenAcctPubkey.toString()} — tx ${sig}`);
         } else if (wallet.signAndSendTransaction) {
-          // some wallets provide signAndSendTransaction (returns signature)
           const res = await wallet.signAndSendTransaction(tx);
           const sig = res?.signature || res;
           await connection.confirmTransaction(sig, 'confirmed');
@@ -169,7 +157,6 @@
           throw new Error('Wallet does not support signTransaction or signAndSendTransaction');
         }
 
-        // small pause between txs
         await wait(600);
       } catch (err) {
         log(`❌ Failed to close ${tokenAcctPubkey.toString()}: ${err?.message || String(err)}`);
@@ -179,9 +166,8 @@
     log('🎉 Reclaim run complete.');
   }
 
-  // Add UI button if not already present
-  const existing = document.getElementById('reclaimRentBtn');
-  if (!existing) {
+  // Add UI button if not present
+  if (!document.getElementById('reclaimRentBtn')) {
     const btn = document.createElement('button');
     btn.id = 'reclaimRentBtn';
     btn.textContent = '🧹 Reclaim Rent';
@@ -189,7 +175,6 @@
     btn.style.color = '#fff';
     btn.style.marginTop = '10px';
     btn.onclick = reclaimRent;
-    // append after walletApp if present
     const walletApp = document.getElementById('walletApp');
     if (walletApp) walletApp.appendChild(btn);
     else document.body.appendChild(btn);
