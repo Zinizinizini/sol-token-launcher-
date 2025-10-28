@@ -98,13 +98,16 @@ function buildConnection(){ return new solanaWeb3.Connection(HELIUS_RPC,'confirm
 
 async function getTokenPrices(mints){
   if(!mints.length) return {};
-  const res = await fetch('https://api.helius.xyz/v0/token-prices?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775',{
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mints})
-  });
-  const data = await res.json();
-  const map={};
-  data.forEach(p=>map[p.mint]=p.price||0);
-  return map;
+  try{
+    const res = await fetch('https://api.helius.xyz/v0/token-prices?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mints})
+    });
+    const data = await res.json();
+    if(!Array.isArray(data)) return {};
+    const map={};
+    data.forEach(p=>{ map[p.mint] = p.price || 0; });
+    return map;
+  }catch(e){ log('⚠️ Token prices fetch failed: '+e.message); return {}; }
 }
 
 async function connectWalletFunc(){
