@@ -50,7 +50,7 @@ let wallet=null;
 let publicKey=null;
 let connection=null;
 
-function log(msg){ logsEl.innerText+=msg+'\n'; logsEl.scrollTop=logsEl.scrollHeight; console.log(msg);}
+function log(msg){ logsEl.innerText+=msg+'\n'; logsEl.scrollTop=logsEl.scrollHeight; console.log(msg); }
 function clearLogs(){ logsEl.innerText=''; }
 
 function detectWallets(){
@@ -69,7 +69,7 @@ function populateWalletDropdown(){
     opt.textContent=w.name;
     walletSelect.appendChild(opt);
   });
-  log('Detected wallets: '+detectWallets().map(d=>d.name).join(', '));
+  log('Detected wallets: '+(detectWallets().map(d=>d.name).join(', ') || 'none'));
 }
 
 function getSelectedWallet(){ 
@@ -133,6 +133,15 @@ async function disconnectWalletFunc(){
   catch(e){ log('❌ Disconnect error: '+e.message);}
 }
 
+/*
+  Main reclaimRent improvements:
+  - convert string pubkeys to solanaWeb3.PublicKey
+  - skip accounts with non-zero balance
+  - require owner === publicKey
+  - call wallet.signTransaction(tx) so popup shows data
+  - simulate signed tx (connection.simulateTransaction) and log simulation errors/logs
+  - only send signed tx if simulation succeeded (or if wallet only supports signAndSendTransaction)
+*/
 async function reclaimRent(){
   if(!wallet||!publicKey){ log('❌ Connect wallet first.'); return; }
   clearLogs();
@@ -155,7 +164,7 @@ async function reclaimRent(){
     const info=t.account.data.parsed.info;
     const amount=Number(info.tokenAmount.uiAmount);
     const usdValue = amount*(prices[info.mint]||0);
-    return usdValue<DUST_THRESHOLD_USD;
+    return usdValue < DUST_THRESHOLD_USD;
   });
 
   if(empty.length===0){ log('✅ No dust accounts to reclaim'); return; }
@@ -163,44 +172,95 @@ async function reclaimRent(){
   log(`🪣 Found ${empty.length} dust token account(s). Closing...`);
 
   for (const t of empty) {
-    const tokenPub = t.pubkey;
+    // ensure pubkey is a PublicKey instance
+    const tokenPub = new solanaWeb3.PublicKey(t.pubkey);
     const info = t.account.data.parsed.info;
 
-    // 🛡️ Check ownership before attempting to close
+    // ownership check
     if (info.owner !== publicKey) {
       log(`⚠️ Skipping ${tokenPub.toString()} — owner mismatch (owned by ${info.owner})`);
       continue;
     }
 
+    // non-zero balance check
+    const amount = Number(info.tokenAmount.uiAmount);
+    if (amount > 0) {
+      log(`⚠️ Skipping ${tokenPub.toString()} — non-zero balance (${amount})`);
+      continue;
+    }
+
     try {
+      // build keys with PublicKey objects
       const keys = [
-        { pubkey: tokenPub, isSigner: false, isWritable: true },
-        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: false, isWritable: true },
-        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: true, isWritable: false }
+        { pubkey: tokenPub, isSigner: false, isWritable: true }, // account to close
+        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: false, isWritable: true }, // destination (SOL)
+        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: true, isWritable: false } // owner (must sign)
       ];
 
       const ix = new solanaWeb3.TransactionInstruction({
         keys,
         programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
-        data: Uint8Array.from([9]) // close account
+        data: Uint8Array.from([9]) // CloseAccount instruction index
       });
 
       const tx = new solanaWeb3.Transaction().add(ix);
+
+      // set fee payer and recent blockhash
       tx.feePayer = new solanaWeb3.PublicKey(publicKey);
       const { blockhash } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
 
-      let sig;
+      // Prefer wallets that implement signTransaction() so popup shows tx details
       if (wallet.signTransaction) {
+        log(`🔏 Prompting wallet to sign (shows transaction data) for ${tokenPub.toString()}...`);
+        // Let the wallet show the tx and sign it
         const signedTx = await wallet.signTransaction(tx);
-        sig = await connection.sendRawTransaction(signedTx.serialize());
-      } else if (wallet.signAndSendTransaction) {
-        const res = await wallet.signAndSendTransaction(tx);
-        sig = res?.signature || res;
-      } else throw new Error('Wallet cannot sign transaction');
 
-      await connection.confirmTransaction(sig, 'confirmed');
-      log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
+        // simulate signed transaction to get errors/logs before sending
+        log('🔬 Simulating signed transaction...');
+        let sim;
+        try{
+          // connection.simulateTransaction accepts Transaction or serialized buffer depending on SDK version.
+          // Passing the Transaction object works with recent web3.js; if not, use serialize.
+          sim = await connection.simulateTransaction(signedTx);
+        }catch(simErr){
+          // try fallback to serialized if direct simulation fails
+          try{
+            sim = await connection.simulateTransaction(signedTx.serialize());
+          }catch(e2){
+            sim = { value: { err: { message: 'Simulation failed to run' }, logs: [`Simulation error: ${simErr?.message||simErr}`] } };
+          }
+        }
+
+        if(sim?.value?.err){
+          log(`❌ Simulation error for ${tokenPub.toString()}: ${JSON.stringify(sim.value.err)}`);
+          if(Array.isArray(sim.value.logs)) sim.value.logs.forEach(L=>log('• '+L));
+          log('⛔ Not sending transaction because simulation failed.');
+          continue; // skip sending
+        }else{
+          log(`✅ Simulation OK for ${tokenPub.toString()}. Sending transaction...`);
+          // send signed transaction
+          const raw = signedTx.serialize();
+          const sig = await connection.sendRawTransaction(raw);
+          await connection.confirmTransaction(sig,'confirmed');
+          log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
+        }
+
+      } else if (wallet.signAndSendTransaction) {
+        // Wallet doesn't support signTransaction but supports signAndSend => can't show tx popup details before signing
+        log('ℹ️ Wallet does not support signTransaction(); using signAndSendTransaction() (wallet will show its own UI).');
+        try{
+          const res = await wallet.signAndSendTransaction(tx);
+          const sig = res?.signature || res;
+          await connection.confirmTransaction(sig,'confirmed');
+          log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
+        }catch(e){
+          log(`❌ Failed ${tokenPub.toString()}: ${e?.message || e}`);
+        }
+      } else {
+        throw new Error('Wallet has no signTransaction or signAndSendTransaction method');
+      }
+
     } catch (e) {
       log(`❌ Failed ${tokenPub.toString()}: ${e?.message || e}`);
     }
