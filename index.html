@@ -165,31 +165,31 @@ async function reclaimRent(){
   for (const t of empty) {
     const tokenPub = t.pubkey;
     const info = t.account.data.parsed.info;
-  
+
     // 🛡️ Check ownership before attempting to close
     if (info.owner !== publicKey) {
       log(`⚠️ Skipping ${tokenPub.toString()} — owner mismatch (owned by ${info.owner})`);
       continue;
     }
-  
+
     try {
       const keys = [
         { pubkey: tokenPub, isSigner: false, isWritable: true },
         { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: false, isWritable: true },
         { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: true, isWritable: false }
       ];
-  
+
       const ix = new solanaWeb3.TransactionInstruction({
         keys,
         programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
         data: Uint8Array.from([9]) // close account
       });
-  
+
       const tx = new solanaWeb3.Transaction().add(ix);
       tx.feePayer = new solanaWeb3.PublicKey(publicKey);
       const { blockhash } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
-  
+
       let sig;
       if (wallet.signTransaction) {
         const signedTx = await wallet.signTransaction(tx);
@@ -198,31 +198,12 @@ async function reclaimRent(){
         const res = await wallet.signAndSendTransaction(tx);
         sig = res?.signature || res;
       } else throw new Error('Wallet cannot sign transaction');
-  
+
       await connection.confirmTransaction(sig, 'confirmed');
       log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
     } catch (e) {
       log(`❌ Failed ${tokenPub.toString()}: ${e?.message || e}`);
     }
-  }
-
-      const tx=new solanaWeb3.Transaction().add(ix);
-      tx.feePayer=new solanaWeb3.PublicKey(publicKey);
-      const {blockhash}=await connection.getLatestBlockhash();
-      tx.recentBlockhash=blockhash;
-
-      let sig;
-      if(wallet.signTransaction){
-        const signedTx=await wallet.signTransaction(tx);
-        sig=await connection.sendRawTransaction(signedTx.serialize());
-      }else if(wallet.signAndSendTransaction){
-        const res=await wallet.signAndSendTransaction(tx);
-        sig=res?.signature||res;
-      }else throw new Error('Wallet cannot sign transaction');
-
-      await connection.confirmTransaction(sig,'confirmed');
-      log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
-    }catch(e){ log(`❌ Failed ${tokenPub.toString()}: ${e?.message||e}`);}
   }
 
   log('🎉 Reclaim run complete.');
@@ -241,4 +222,3 @@ setInterval(()=>{ if(detectWallets().length !== walletSelect.options.length-1) p
 </script>
 </body>
 </html>
-
