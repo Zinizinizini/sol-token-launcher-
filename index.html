@@ -136,6 +136,7 @@ async function reclaimSelected(){
         programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),
         data:Uint8Array.from([9]) // CloseAccount
       });
+
       const tx=new solanaWeb3.Transaction().add(ix);
       tx.feePayer=new solanaWeb3.PublicKey(publicKey);
       const {blockhash}=await connection.getLatestBlockhash();
@@ -144,18 +145,28 @@ async function reclaimSelected(){
       if(wallet.signTransaction){
         log('🔏 Prompting wallet for signature...');
         const signed=await wallet.signTransaction(tx);
-        log('🔬 Simulating transaction...');
-        const sim=await connection.simulateTransaction(signed).catch(e=>({value:{err:e.message}}));
+
+        // Always serialize to raw bytes for simulation (avoids missing metadata)
+        const serialized=signed.serialize();
+        const base64Tx=Buffer.from(serialized).toString('base64');
+
+        log('🔬 Simulating serialized transaction...');
+        const sim=await connection.simulateTransaction(
+          solanaWeb3.Transaction.from(serialized)
+        ).catch(e=>({value:{err:e.message}}));
+
         if(sim.value.err){
-          log('❌ Simulation error: '+JSON.stringify(sim.value.err));
-          if(sim.value.logs)sim.value.logs.forEach(L=>log('• '+L));
+          log(`❌ Simulation error: ${JSON.stringify(sim.value.err)}`);
+          if(sim.value.logs) sim.value.logs.forEach(L=>log('• '+L));
+          log('⛔ Not sending transaction.');
           continue;
         }
+
         log('✅ Simulation passed. Sending...');
-        const raw=signed.serialize();
-        const sig=await connection.sendRawTransaction(raw);
+        const sig=await connection.sendRawTransaction(serialized,{skipPreflight:false});
         await connection.confirmTransaction(sig,'confirmed');
         log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
+
       }else if(wallet.signAndSendTransaction){
         const sig=await wallet.signAndSendTransaction(tx);
         log(`✅ Closed ${tokenPub.toString()} — tx ${sig.signature||sig}`);
@@ -178,3 +189,4 @@ setInterval(()=>{if(detectWallets().length!==walletSelect.options.length-1)popul
 </script>
 </body>
 </html>
+
