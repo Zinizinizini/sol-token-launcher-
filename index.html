@@ -7,28 +7,29 @@
 <style>
 body{font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:40px;background:#f0f2f5}
 #walletApp{max-width:700px;width:100%;padding:20px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.08)}
-button{padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5;background:#4caf50;color:#fff}
+button,select{padding:12px;border-radius:8px;border:0;font-size:15px;cursor:pointer;margin:5px}
+button{background:#4caf50;color:#fff}
 button:hover{background:#45a049}
 #logs{margin-top:12px;padding:12px;border-radius:8px;background:#e8f4fd;white-space:pre-wrap;max-height:420px;overflow:auto;text-align:left}
-h2{margin:0 0 12px 0}
+#tokenList{margin-top:12px;border:1px solid #ddd;border-radius:8px;padding:8px;max-height:250px;overflow:auto;background:#fafafa;text-align:left}
+.token-item{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .note{font-size:13px;color:#666;margin-top:8px}
+h2{margin:0 0 12px 0}
 </style>
 </head>
 <body>
 <div id="walletApp">
   <h2>Universal Solana Wallet DApp (Helius)</h2>
-
   <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px">
     <select id="walletSelect"><option value="">Select Wallet</option></select>
   </div>
-
   <div style="text-align:center">
     <button id="connectWallet">Connect Wallet</button>
     <button id="disconnectWallet">Disconnect Wallet</button>
-    <button id="reclaimRentBtn">🧹 Reclaim Rent</button>
+    <button id="reclaimRentBtn">🧹 Reclaim Selected</button>
   </div>
-
-  <div class="note">Using Helius RPC (demo key) — do not commit private keys to public repos.</div>
+  <div id="tokenList">No tokens loaded.</div>
+  <div class="note">Using Helius RPC (demo key) — never share private keys.</div>
   <div id="logs">Logs will appear here...</div>
 </div>
 
@@ -36,19 +37,20 @@ h2{margin:0 0 12px 0}
 
 <script>
 (async function(){
-const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
-const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const DUST_THRESHOLD_USD = 0.01;
+const HELIUS_RPC='https://mainnet.helius-rpc.com/?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775';
+const TOKEN_PROGRAM='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
-const logsEl = document.getElementById('logs');
-const walletSelect = document.getElementById('walletSelect');
-const connectBtn = document.getElementById('connectWallet');
-const disconnectBtn = document.getElementById('disconnectWallet');
-const reclaimBtn = document.getElementById('reclaimRentBtn');
+const logsEl=document.getElementById('logs');
+const walletSelect=document.getElementById('walletSelect');
+const connectBtn=document.getElementById('connectWallet');
+const disconnectBtn=document.getElementById('disconnectWallet');
+const reclaimBtn=document.getElementById('reclaimRentBtn');
+const tokenList=document.getElementById('tokenList');
 
 let wallet=null;
 let publicKey=null;
-let connection=null;
+let connection=new solanaWeb3.Connection(HELIUS_RPC,'confirmed');
+let tokenAccounts=[];
 
 function log(msg){ logsEl.innerText+=msg+'\n'; logsEl.scrollTop=logsEl.scrollHeight; console.log(msg); }
 function clearLogs(){ logsEl.innerText=''; }
@@ -56,228 +58,122 @@ function clearLogs(){ logsEl.innerText=''; }
 function detectWallets(){
   const wallets=[];
   if(window.phantom?.solana?.isPhantom) wallets.push({wallet:window.phantom.solana,name:'Phantom'});
-  if(window.solflare && window.solflare.isSolflare) wallets.push({wallet:window.solflare,name:'Solflare'});
-  if(window.Slope){ try{ wallets.push({wallet:new window.Slope(),name:'Slope'}); }catch{} }
+  if(window.solflare?.isSolflare) wallets.push({wallet:window.solflare,name:'Solflare'});
+  if(window.Slope){try{wallets.push({wallet:new window.Slope(),name:'Slope'});}catch{}}
   return wallets;
 }
-
 function populateWalletDropdown(){
   walletSelect.innerHTML='<option value="">Select Wallet</option>';
   detectWallets().forEach(w=>{
     const opt=document.createElement('option');
-    opt.value=w.name;
-    opt.textContent=w.name;
+    opt.value=w.name; opt.textContent=w.name;
     walletSelect.appendChild(opt);
   });
-  log('Detected wallets: '+(detectWallets().map(d=>d.name).join(', ') || 'none'));
 }
-
-function getSelectedWallet(){ 
-  const name=walletSelect.value;
-  return detectWallets().find(w=>w.name===name);
-}
-
-function buildConnection(){ return new solanaWeb3.Connection(HELIUS_RPC,'confirmed'); }
-
-async function getTokenPrices(mints){
-  if(!mints.length) return {};
-  try{
-    const res = await fetch('https://api.helius.xyz/v0/token-prices?api-key=b933e448-6fee-4016-b4ec-3c6c19a46775',{
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mints})
-    });
-    const data = await res.json();
-    if(!Array.isArray(data)) return {};
-    const map={};
-    data.forEach(p=>{ map[p.mint]=p.price||0; });
-    return map;
-  }catch(e){ log('⚠️ Token prices fetch failed: '+e.message); return {}; }
-}
+function getSelectedWallet(){const n=walletSelect.value;return detectWallets().find(w=>w.name===n);}
 
 async function connectWalletFunc(){
   clearLogs();
   const sel=getSelectedWallet();
-  if(!sel){ log('❌ Select a wallet first'); return; }
+  if(!sel){log('❌ Select a wallet first');return;}
   try{
     log('Connecting '+sel.name+'...');
     const resp=await sel.wallet.connect();
-    publicKey=resp?.publicKey||sel.wallet?.publicKey;
-    if(publicKey?.toString) publicKey=publicKey.toString();
+    publicKey=(resp?.publicKey||sel.wallet?.publicKey).toString();
     wallet=sel.wallet;
     log('✅ Connected: '+publicKey);
-    if(!connection) connection=buildConnection();
 
-    // SOL Balance
     const lamports=await connection.getBalance(new solanaWeb3.PublicKey(publicKey));
     log('💰 SOL Balance: '+(lamports/1e9).toFixed(6)+' SOL');
 
-    // SPL Token Accounts
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+    tokenAccounts=await connection.getParsedTokenAccountsByOwner(
       new solanaWeb3.PublicKey(publicKey),
-      { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM) }
+      {programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM)}
     );
-    const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
-    const prices = await getTokenPrices(mints);
-    if(!tokenAccounts.value.length) log('No SPL tokens found.');
-    else tokenAccounts.value.forEach((t,i)=>{
+    if(!tokenAccounts.value.length){tokenList.innerHTML='No SPL tokens found.';return;}
+    tokenList.innerHTML='';
+    tokenAccounts.value.forEach((t,i)=>{
       const info=t.account.data.parsed.info;
-      const amount=Number(info.tokenAmount.uiAmount);
-      const usd=(amount*(prices[info.mint]||0)).toFixed(6);
-      log(`${i+1}. Mint: ${info.mint}, Amount: ${amount}, ~$${usd} USD`);
+      const amount=info.tokenAmount.uiAmount;
+      const mint=info.mint;
+      const div=document.createElement('div');
+      div.className='token-item';
+      div.innerHTML=`<input type="checkbox" data-index="${i}" />
+                     <span><b>${i+1}.</b> ${mint} — ${amount}</span>`;
+      tokenList.appendChild(div);
     });
-  }catch(e){ log('❌ Connect failed: '+e.message); }
+    log('✅ Token list loaded.');
+  }catch(e){log('❌ Connect failed: '+e.message);}
 }
 
 async function disconnectWalletFunc(){
-  if(!wallet){ log('❌ No wallet connected'); return; }
-  try{ if(wallet.disconnect) await wallet.disconnect(); log('Wallet disconnected'); wallet=null; publicKey=null;}
-  catch(e){ log('❌ Disconnect error: '+e.message);}
+  if(!wallet){log('❌ No wallet connected');return;}
+  try{if(wallet.disconnect)await wallet.disconnect();wallet=null;publicKey=null;tokenList.innerHTML='No tokens loaded.';log('Wallet disconnected');}
+  catch(e){log('❌ Disconnect error: '+e.message);}
 }
 
-/*
-  Main reclaimRent improvements:
-  - convert string pubkeys to solanaWeb3.PublicKey
-  - skip accounts with non-zero balance
-  - require owner === publicKey
-  - call wallet.signTransaction(tx) so popup shows data
-  - simulate signed tx (connection.simulateTransaction) and log simulation errors/logs
-  - only send signed tx if simulation succeeded (or if wallet only supports signAndSendTransaction)
-*/
-async function reclaimRent(){
-  if(!wallet||!publicKey){ log('❌ Connect wallet first.'); return; }
+async function reclaimSelected(){
+  if(!wallet||!publicKey){log('❌ Connect wallet first.');return;}
   clearLogs();
   log('🧹 Reclaim Rent started...');
-  let tokenAccounts;
-  try{
-    tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-      new solanaWeb3.PublicKey(publicKey),
-      { programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM)}
-    );
-  }catch(e){ log('❌ Fetch token accounts failed: '+e.message); return; }
+  const checked=[...tokenList.querySelectorAll('input[type=checkbox]:checked')];
+  if(!checked.length){log('❌ No token accounts selected.');return;}
 
-  if(!tokenAccounts?.value?.length){ log('✅ No token accounts found.'); return; }
-
-  const mints = tokenAccounts.value.map(t=>t.account.data.parsed.info.mint);
-  const prices = await getTokenPrices(mints);
-
-  // Only close dust accounts (USD value < threshold)
-  const empty = tokenAccounts.value.filter(t=>{
+  for(const c of checked){
+    const idx=parseInt(c.dataset.index);
+    const t=tokenAccounts.value[idx];
     const info=t.account.data.parsed.info;
-    const amount=Number(info.tokenAmount.uiAmount);
-    const usdValue = amount*(prices[info.mint]||0);
-    return usdValue < DUST_THRESHOLD_USD;
-  });
+    const tokenPub=new solanaWeb3.PublicKey(t.pubkey);
+    log(`🔧 Preparing close for ${tokenPub.toString()} (mint ${info.mint}, balance ${info.tokenAmount.uiAmount})`);
 
-  if(empty.length===0){ log('✅ No dust accounts to reclaim'); return; }
-
-  log(`🪣 Found ${empty.length} dust token account(s). Closing...`);
-
-  for (const t of empty) {
-    // ensure pubkey is a PublicKey instance
-    const tokenPub = new solanaWeb3.PublicKey(t.pubkey);
-    const info = t.account.data.parsed.info;
-
-    // ownership check
-    if (info.owner !== publicKey) {
-      log(`⚠️ Skipping ${tokenPub.toString()} — owner mismatch (owned by ${info.owner})`);
-      continue;
-    }
-
-    // non-zero balance check
-    const amount = Number(info.tokenAmount.uiAmount);
-    if (amount > 0) {
-      log(`⚠️ Skipping ${tokenPub.toString()} — non-zero balance (${amount})`);
-      continue;
-    }
-
-    try {
-      // build keys with PublicKey objects
-      const keys = [
-        { pubkey: tokenPub, isSigner: false, isWritable: true }, // account to close
-        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: false, isWritable: true }, // destination (SOL)
-        { pubkey: new solanaWeb3.PublicKey(publicKey), isSigner: true, isWritable: false } // owner (must sign)
-      ];
-
-      const ix = new solanaWeb3.TransactionInstruction({
-        keys,
-        programId: new solanaWeb3.PublicKey(TOKEN_PROGRAM),
-        data: Uint8Array.from([9]) // CloseAccount instruction index
+    try{
+      const ix=new solanaWeb3.TransactionInstruction({
+        keys:[
+          {pubkey:tokenPub,isSigner:false,isWritable:true},
+          {pubkey:new solanaWeb3.PublicKey(publicKey),isSigner:false,isWritable:true},
+          {pubkey:new solanaWeb3.PublicKey(publicKey),isSigner:true,isWritable:false}
+        ],
+        programId:new solanaWeb3.PublicKey(TOKEN_PROGRAM),
+        data:Uint8Array.from([9]) // CloseAccount
       });
+      const tx=new solanaWeb3.Transaction().add(ix);
+      tx.feePayer=new solanaWeb3.PublicKey(publicKey);
+      const {blockhash}=await connection.getLatestBlockhash();
+      tx.recentBlockhash=blockhash;
 
-      const tx = new solanaWeb3.Transaction().add(ix);
-
-      // set fee payer and recent blockhash
-      tx.feePayer = new solanaWeb3.PublicKey(publicKey);
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-
-      // Prefer wallets that implement signTransaction() so popup shows tx details
-      if (wallet.signTransaction) {
-        log(`🔏 Prompting wallet to sign (shows transaction data) for ${tokenPub.toString()}...`);
-        // Let the wallet show the tx and sign it
-        const signedTx = await wallet.signTransaction(tx);
-
-        // simulate signed transaction to get errors/logs before sending
-        log('🔬 Simulating signed transaction...');
-        let sim;
-        try{
-          // connection.simulateTransaction accepts Transaction or serialized buffer depending on SDK version.
-          // Passing the Transaction object works with recent web3.js; if not, use serialize.
-          sim = await connection.simulateTransaction(signedTx);
-        }catch(simErr){
-          // try fallback to serialized if direct simulation fails
-          try{
-            sim = await connection.simulateTransaction(signedTx.serialize());
-          }catch(e2){
-            sim = { value: { err: { message: 'Simulation failed to run' }, logs: [`Simulation error: ${simErr?.message||simErr}`] } };
-          }
+      if(wallet.signTransaction){
+        log('🔏 Prompting wallet for signature...');
+        const signed=await wallet.signTransaction(tx);
+        log('🔬 Simulating transaction...');
+        const sim=await connection.simulateTransaction(signed).catch(e=>({value:{err:e.message}}));
+        if(sim.value.err){
+          log('❌ Simulation error: '+JSON.stringify(sim.value.err));
+          if(sim.value.logs)sim.value.logs.forEach(L=>log('• '+L));
+          continue;
         }
-
-        if(sim?.value?.err){
-          log(`❌ Simulation error for ${tokenPub.toString()}: ${JSON.stringify(sim.value.err)}`);
-          if(Array.isArray(sim.value.logs)) sim.value.logs.forEach(L=>log('• '+L));
-          log('⛔ Not sending transaction because simulation failed.');
-          continue; // skip sending
-        }else{
-          log(`✅ Simulation OK for ${tokenPub.toString()}. Sending transaction...`);
-          // send signed transaction
-          const raw = signedTx.serialize();
-          const sig = await connection.sendRawTransaction(raw);
-          await connection.confirmTransaction(sig,'confirmed');
-          log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
-        }
-
-      } else if (wallet.signAndSendTransaction) {
-        // Wallet doesn't support signTransaction but supports signAndSend => can't show tx popup details before signing
-        log('ℹ️ Wallet does not support signTransaction(); using signAndSendTransaction() (wallet will show its own UI).');
-        try{
-          const res = await wallet.signAndSendTransaction(tx);
-          const sig = res?.signature || res;
-          await connection.confirmTransaction(sig,'confirmed');
-          log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
-        }catch(e){
-          log(`❌ Failed ${tokenPub.toString()}: ${e?.message || e}`);
-        }
-      } else {
-        throw new Error('Wallet has no signTransaction or signAndSendTransaction method');
+        log('✅ Simulation passed. Sending...');
+        const raw=signed.serialize();
+        const sig=await connection.sendRawTransaction(raw);
+        await connection.confirmTransaction(sig,'confirmed');
+        log(`✅ Closed ${tokenPub.toString()} — tx ${sig}`);
+      }else if(wallet.signAndSendTransaction){
+        const sig=await wallet.signAndSendTransaction(tx);
+        log(`✅ Closed ${tokenPub.toString()} — tx ${sig.signature||sig}`);
+      }else{
+        log('❌ Wallet lacks signTransaction interface.');
       }
-
-    } catch (e) {
-      log(`❌ Failed ${tokenPub.toString()}: ${e?.message || e}`);
+    }catch(e){
+      log(`❌ Failed ${tokenPub.toString()}: ${e.message}`);
     }
   }
-
   log('🎉 Reclaim run complete.');
 }
 
-// Button events
-connectBtn.addEventListener('click', connectWalletFunc);
-disconnectBtn.addEventListener('click', disconnectWalletFunc);
-reclaimBtn.addEventListener('click', reclaimRent);
-
-// Init
+connectBtn.addEventListener('click',connectWalletFunc);
+disconnectBtn.addEventListener('click',disconnectWalletFunc);
+reclaimBtn.addEventListener('click',reclaimSelected);
 populateWalletDropdown();
-connection=buildConnection();
-setInterval(()=>{ if(detectWallets().length !== walletSelect.options.length-1) populateWalletDropdown(); },3000);
+setInterval(()=>{if(detectWallets().length!==walletSelect.options.length-1)populateWalletDropdown();},3000);
 })();
 </script>
 </body>
